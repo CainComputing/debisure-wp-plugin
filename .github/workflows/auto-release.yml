@@ -145,23 +145,23 @@ jobs:
 
           # Build plugin.json cleanly against left margin
           cat <<EOF > plugin.json
-{
-  "name": "Debisure Integration",
-  "version": "$VERSION",
-  "download_url": "https://github.com/${{ github.repository }}/releases/download/$VERSION/debisure-wp-plugin.zip",
-  "homepage": "https://www.debisure.com",
-  "requires": "${{ env.REQUIRES_AT_LEAST }}",
-  "tested": "${{ env.TESTED_UP_TO }}",
-  "last_updated": "${{ env.CURRENT_DATE }}",
-  "author": "Debisure",
-  "author_homepage": "https://www.debisure.com",
-  "sections": {
-    "description": "$DESC_JSON",
-    "installation": "$INSTALL_JSON",
-    "changelog": "$CHANGELOG_HTML"
-  }
-}
-EOF
+          {
+            "name": "Debisure Integration",
+            "version": "$VERSION",
+            "download_url": "https://github.com/${{ github.repository }}/releases/download/$VERSION/debisure-wp-plugin.zip",
+            "homepage": "https://www.debisure.com",
+            "requires": "${{ env.REQUIRES_AT_LEAST }}",
+            "tested": "${{ env.TESTED_UP_TO }}",
+            "last_updated": "${{ env.CURRENT_DATE }}",
+            "author": "Debisure",
+            "author_homepage": "https://www.debisure.com",
+            "sections": {
+              "description": "$DESC_JSON",
+              "installation": "$INSTALL_JSON",
+              "changelog": "$CHANGELOG_HTML"
+            }
+          }
+          EOF
 
       - name: Package Plugin Directory and Inject Version
         run: |
