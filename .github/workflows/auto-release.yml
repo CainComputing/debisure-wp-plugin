@@ -1,0 +1,88 @@
+name: Auto Release on Tag
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+*' # Triggers whenever you push a tag like 1.0.1, 1.0.2, etc.
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create the release and upload assets
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Extract Version from Tag
+        id: get_version
+        run: |
+          TAG_REF="${{ github.ref_name }}"
+          VERSION="${TAG_REF#v}"
+          
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not determine version from tag."
+            exit 1
+          fi
+          
+          echo "Target Release Version: $VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Package Plugin Directory and Inject Version
+        run: |
+          # 1. Create temporary directory matching local naming conventions
+          mkdir -p build/debisure
+          
+          # 2. Copy current codebase into it
+          rsync -rc --exclude='.git*' --exclude='.github' --exclude='build' ./ build/debisure/
+          
+          # 3. Swap the placeholder version with the actual version inside the build directory
+          sed -i "s/\(Version:\s*\)[0-9]\+\.[0-9]\+\.[0-9]\+/\1${{ env.VERSION }}/g" build/debisure/debisure.php
+          
+          # 4. Zip it so that 'debisure' remains the internal folder layout
+          cd build
+          zip -r ../debisure-wp-plugin.zip debisure/
+
+      - name: Generate Plugin Metadata JSON
+        run: |
+          CURRENT_DATE=$(date -u +"%Y-%m-%d %H:%M:%S")
+
+          cat <<EOF > plugin.json
+          {
+            "name": "Debisure Integration",
+            "version": "${{ env.VERSION }}",
+            "download_url": "https://github.com/CainComputing/debisure-wp-plugin/releases/download/${{ env.VERSION }}/debisure-wp-plugin.zip",
+            "homepage": "https://www.debisure.com",
+            "requires": "6.0",
+            "tested": "6.5",
+            "last_updated": "$CURRENT_DATE",
+            "upgrade_notice": "Automated release update for version ${{ env.VERSION }}.",
+            "author": "Debisure",
+            "author_homepage": "https://www.debisure.com",
+            "sections": {
+              "description": "Integrates Debisure services with WordPress, providing seamless mandate tracking, encrypted data routing, and custom administration utilities.",
+              "installation": "Upload the plugin files to the /wp-content/plugins/debisure directory, or install the zip package directly through the WordPress plugins screen.",
+              "changelog": "<h4>${{ env.VERSION }} - $CURRENT_DATE</h4><ul><li>Automated production build via tag push.</li></ul>",
+              "custom_section": "Core structural updates for tracking client mandates."
+            }
+          }
+          EOF
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: Release ${{ env.VERSION }}
+          body: |
+            ### Debisure Integration Release ${{ env.VERSION }}
+            Automated production build triggered by tag push.
+            
+            *Note: Local plugin version and metadata injected dynamically from build workflow.*
+          draft: false
+          prerelease: false
+          files: |
+            debisure-wp-plugin.zip
+            plugin.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
