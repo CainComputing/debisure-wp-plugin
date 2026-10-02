@@ -3,10 +3,10 @@ name: Auto Release on Tag
 on:
   push:
     tags:
-      - '[0-9]+.[0-9]+.[0-9]+*' # Triggers on any semantic tag push, e.g., 1.0.1, 1.0.2
+      - '[0-9]+.[0-9]+.[0-9]+*' # Triggers on any semantic tag push, e.g., 1.0.5, 1.0.6
 
 env:
-  REQUIRES_AT_LEAST: "7.1" # Configure your minimum required WordPress version here
+  REQUIRES_AT_LEAST: "6.0" # Configure your minimum required WordPress version here
 
 jobs:
   release:
@@ -18,7 +18,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v2
         with:
-          fetch-depth: 0 # Required to fetch git commit logs for changelogs
+          fetch-depth: 0 # Required to fetch git commit logs and tag decorations
 
       - name: Extract Version & Fetch Dynamic Metadata
         id: metadata
@@ -66,39 +66,33 @@ jobs:
           fi
           echo "LICENSE_TYPE=$LICENSE_TYPE" >> $GITHUB_ENV
 
+          # 4. Timestamps
           CURRENT_DATE=$(date -u +"%Y-%m-%d %H:%M:%S")
           echo "CURRENT_DATE=$CURRENT_DATE" >> $GITHUB_ENV
+
+          CLEAN_DATE=$(date -u +"%Y-%m-%d")
+          echo "CLEAN_DATE=$CLEAN_DATE" >> $GITHUB_ENV
 
       - name: Generate Changelog and Parse README
         id: parser
         run: |
-          # 1. Generate Markdown Changelog from Git Commit Messages (ordered newest to oldest)
-          # Gathers commit messages since the previous tag, or last 10 if it's the first tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [ -z "$PREV_TAG" ]; then
-            COMMITS=$(git log --pretty=format:"* %s" -n 10)
-          else
-            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"* %s")
-          fi
+          # 1. Read last 20 commits and filter only those that have a git tag attached
+          COMMITS=""
+          while IFS='---' read -r decor subj; do
+            if echo "$decor" | grep -q "tag:"; then
+              COMMITS="${COMMITS}* $subj"$'\n'
+            fi
+          done < <(git log -n 20 --decorate=short --pretty=format:"%D---%s")
           
           if [ -z "$COMMITS" ]; then
             COMMITS="* Release version ${{ env.VERSION }}"
           fi
           
-          # Save changelog formatted for readme.txt
-          echo "$COMMITS" > changelog_txt.tmp
-          
-          # Save changelog formatted for plugin.json (HTML format)
-          echo "<h4>${{ env.VERSION }} - ${{ env.CURRENT_DATE }}</h4><ul>" > changelog_json.tmp
-          while IFS=read -r line; do
-            clean_line=$(echo "$line" | sed 's/^\* //')
-            echo "<li>$clean_line</li>" >> changelog_json.tmp
-          done < changelog_txt.tmp
-          echo "</ul>" >> changelog_json.tmp
+          # Save changelog formatted for readme.txt (removing blank lines)
+          echo "$COMMITS" | sed '/^$/d' > changelog_txt.tmp
 
           # 2. Extract Description and Installation text blocks from README.md if it exists
           if [ -f "README.md" ]; then
-            # Simple awk extraction of sections from README.md
             awk '/^## Description/,/^## /' README.md | grep -v '## ' > desc_section.tmp || echo "Integrates Debisure services with WordPress." > desc_section.tmp
             awk '/^## Installation/,/^## /' README.md | grep -v '## ' > install_section.tmp || echo "Upload plugin files to plugins directory." > install_section.tmp
           else
@@ -109,55 +103,67 @@ jobs:
       - name: Assemble readme.txt and plugin.json
         run: |
           VERSION="${{ env.VERSION }}"
+          CLEAN_DATE="${{ env.CLEAN_DATE }}"
 
-          # Build readme.txt
+          DESC_TEXT=$(cat desc_section.tmp | xargs)
+          INSTALL_TEXT=$(cat install_section.tmp | xargs)
+
+          # Build readme.txt cleanly against left margin
           cat <<EOF > readme.txt
-          === Debisure Integration ===
-          Contributors: CainComputing
-          Tags: debisure, integration, security, management
-          Requires at least: ${{ env.REQUIRES_AT_LEAST }}
-          Tested up to: ${{ env.TESTED_UP_TO }}
-          Requires PHP: ${{ env.PHP_REQUIREMENT }}
-          Stable tag: $VERSION
-          License: ${{ env.LICENSE_TYPE }}
-          License URI: ${{ env.LICENSE_URI }}
+=== Debisure Integration ===
+Contributors: CainComputing
+Tags: debisure, integration, security, management
+Requires at least: ${{ env.REQUIRES_AT_LEAST }}
+Tested up to: ${{ env.TESTED_UP_TO }}
+Requires PHP: ${{ env.PHP_REQUIREMENT }}
+Stable tag: $VERSION
+License: ${{ env.LICENSE_TYPE }}
+License URI: ${{ env.LICENSE_URI }}
 
-          Integrates Debisure services with WordPress.
+Integrates Debisure services with WordPress.
 
-          == Description ==
-          $(cat desc_section.tmp)
+== Description ==
+$DESC_TEXT
 
-          == Installation ==
-          $(cat install_section.tmp)
+== Installation ==
+$INSTALL_TEXT
 
-          == Changelog ==
-          = $VERSION =
-          $(cat changelog_txt.tmp)
-          EOF
+== Changelog ==
+= $VERSION =
+$(cat changelog_txt.tmp)
+EOF
 
-          # Build plugin.json
-          DESC_JSON=$(cat desc_section.tmp | tr '\n' ' ' | sed 's/"/\\"/g')
-          INSTALL_JSON=$(cat install_section.tmp | tr '\n' ' ' | sed 's/"/\\"/g')
-          CHANGELOG_HTML=$(cat changelog_json.tmp | tr '\n' ' ')
+          # Build proper HTML changelog for plugin.json
+          HTML_COMMITS=""
+          while IFS= read -r line; do
+            clean_item=$(echo "$line" | sed 's/^\* //')
+            HTML_COMMITS="${HTML_COMMITS}<li>$clean_item</li>"
+          done < changelog_txt.tmp
 
+          CHANGELOG_HTML="<h4>$VERSION - $CLEAN_DATE</h4><ul>$HTML_COMMITS</ul>"
+
+          DESC_JSON=$(echo "$DESC_TEXT" | sed 's/"/\\"/g')
+          INSTALL_JSON=$(echo "$INSTALL_TEXT" | sed 's/"/\\"/g')
+
+          # Build plugin.json cleanly against left margin
           cat <<EOF > plugin.json
-          {
-            "name": "Debisure Integration",
-            "version": "$VERSION",
-            "download_url": "https://github.com/${{ github.repository }}/releases/download/$VERSION/debisure-wp-plugin.zip",
-            "homepage": "https://www.debisure.com",
-            "requires": "${{ env.REQUIRES_AT_LEAST }}",
-            "tested": "${{ env.TESTED_UP_TO }}",
-            "last_updated": "${{ env.CURRENT_DATE }}",
-            "author": "Debisure",
-            "author_homepage": "https://www.debisure.com",
-            "sections": {
-              "description": "$DESC_JSON",
-              "installation": "$INSTALL_JSON",
-              "changelog": "$CHANGELOG_HTML"
-            }
-          }
-          EOF
+{
+  "name": "Debisure Integration",
+  "version": "$VERSION",
+  "download_url": "https://github.com/${{ github.repository }}/releases/download/$VERSION/debisure-wp-plugin.zip",
+  "homepage": "https://www.debisure.com",
+  "requires": "${{ env.REQUIRES_AT_LEAST }}",
+  "tested": "${{ env.TESTED_UP_TO }}",
+  "last_updated": "${{ env.CURRENT_DATE }}",
+  "author": "Debisure",
+  "author_homepage": "https://www.debisure.com",
+  "sections": {
+    "description": "$DESC_JSON",
+    "installation": "$INSTALL_JSON",
+    "changelog": "$CHANGELOG_HTML"
+  }
+}
+EOF
 
       - name: Package Plugin Directory and Inject Version
         run: |
@@ -183,7 +189,7 @@ jobs:
             Automated production build triggered by tag push.
             
             * **Tested WordPress Version:** ${{ env.TESTED_UP_TO }}
-            * **Changelog pulled dynamically from recent git commits.**
+            * **Changelog filtered from tagged commits.**
           draft: false
           prerelease: false
           files: |
