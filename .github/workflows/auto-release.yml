@@ -117,27 +117,27 @@ jobs:
 
           # Build readme.txt cleanly against left margin
           cat <<EOF > readme.txt
-=== Debisure Integration ===
-Contributors: CainComputing
-Tags: debisure, integration, security, management
-Requires at least: ${{ env.REQUIRES_AT_LEAST }}
-Tested up to: ${{ env.TESTED_UP_TO }}
-Requires PHP: ${{ env.PHP_REQUIREMENT }}
-Stable tag: $VERSION
-License: ${{ env.LICENSE_TYPE }}
-License URI: ${{ env.LICENSE_URI }}
+          === Debisure Integration ===
+          Contributors: CainComputing
+          Tags: debisure, integration, security, management
+          Requires at least: ${{ env.REQUIRES_AT_LEAST }}
+          Tested up to: ${{ env.TESTED_UP_TO }}
+          Requires PHP: ${{ env.PHP_REQUIREMENT }}
+          Stable tag: $VERSION
+          License: ${{ env.LICENSE_TYPE }}
+          License URI: ${{ env.LICENSE_URI }}
 
-Integrates Debisure services with WordPress.
+          Integrates Debisure services with WordPress.
 
-== Description ==
-$DESC_TEXT
+          == Description ==
+          $DESC_TEXT
 
-== Installation ==
-$INSTALL_TEXT
+          == Installation ==
+          $INSTALL_TEXT
 
-== Changelog ==
-$(cat changelog_txt.tmp)
-EOF
+          == Changelog ==
+          $(cat changelog_txt.tmp)
+          EOF
 
           CHANGELOG_HTML=$(cat changelog_html.tmp | tr '\n' ' ')
           DESC_JSON=$(echo "$DESC_TEXT" | sed 's/"/\\"/g')
