@@ -21,7 +21,8 @@ jobs:
           if [ -z "$VERSION" ]; then
             echo "Error: Could not find 'Stable tag' in readme.txt"
             exit 1
-          |
+          fi
+
           echo "Target Release Version: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
@@ -48,7 +49,7 @@ jobs:
           {
             "name": "Debisure Integration",
             "version": "${{ env.VERSION }}",
-            "download_url": "https://github.com/CainComputing/debisure-wp-plugin/releases/download/v${{ env.VERSION }}/debisure-wp-plugin.zip",
+            "download_url": "https://github.com/CainComputing/debisure-wp-plugin/releases/download/${{ env.VERSION }}/debisure-wp-plugin.zip",
             "homepage": "https://www.debisure.com",
             "requires": "6.0",
             "tested": "6.5",
@@ -68,10 +69,10 @@ jobs:
       - name: Create Release and Tag
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: v${{ env.VERSION }}
-          name: Release v${{ env.VERSION }}
+          tag_name: ${{ env.VERSION }}
+          name: Release ${{ env.VERSION }}
           body: |
-            ### Debisure Integration Release v${{ env.VERSION }}
+            ### Debisure Integration Release ${{ env.VERSION }}
             Automated production build triggered manually via GitHub Actions.
             
             *Note: Local plugin version and metadata injected dynamically from build workflow.*
