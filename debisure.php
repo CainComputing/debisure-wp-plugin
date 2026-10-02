@@ -50,19 +50,36 @@ require_once DEBISURE_PLUGIN_DIR . 'includes/class-api.php';
 require_once DEBISURE_PLUGIN_DIR . 'includes/class-form.php';
 require_once DEBISURE_PLUGIN_DIR . 'includes/class-thankyou.php';
 
-//Updater Files for github updates
+// =========================================================================
+// Explicit GitHub Updater Configuration
+// =========================================================================
 
-// Include the Plugin Update Checker library
-require_once plugin_dir_path( __FILE__ ) . 'updater/updater.php';
+// 1. Load the primary library initialization script
+require_once plugin_dir_path( __FILE__ ) . 'updater/plugin-update-checker.php';
 
-use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
+// 2. Import the explicit, production-grade GitHub VCS engine classes
+use YahnisElsts\PluginUpdateChecker\v5p7\Vcs\PluginUpdateChecker;
+use YahnisElsts\PluginUpdateChecker\v5p7\Vcs\GitHubApi;
 
-// Point the checker to your GitHub repository URL
-$myUpdateChecker = PucFactory::buildUpdateChecker(
-    'https://github.com', // The GitHub repository page
-    __FILE__,
-    'debisure' // MUST match the true directory name inside the ZIP ('debisure')
-);
+try {
+    // 3. Force create the specialized GitHub API handler instance
+    $githubApiEngine = new GitHubApi(
+        'https://github.com'
+    );
 
-// Tells PUC to fetch updates strictly from your manually attached release ZIPs
-$myUpdateChecker->getVcsApi()->enableReleaseAssets();
+    // 4. Manually bind the engine to your local plugin file and folder slug
+    $myUpdateChecker = new PluginUpdateChecker(
+        $githubApiEngine,
+        __FILE__,
+        'debisure' // Your true local folder directory name
+    );
+
+    // 5. Safely invoke the release asset pipeline
+    $myUpdateChecker->getVcsApi()->enableReleaseAssets();
+
+} catch (\Throwable $e) {
+    // Graceful error fallback to prevent future dashboard lockout loops
+    if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+        error_log( 'Debisure Updater Sync Error: ' . $e->getMessage() );
+    }
+}
