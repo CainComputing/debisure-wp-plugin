@@ -1,0 +1,60 @@
+name: Manual Plugin Release
+
+on:
+  workflow_dispatch: # Triggered via the button in the Actions tab
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create the tag and release asset
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Read Version from Readme
+        id: get_version
+        run: |
+          # Extract the version number string following "Stable tag:" from readme.txt
+          VERSION=$(grep -i "Stable tag:" readme.txt | awk -F': ' '{print $2}' | xargs)
+          
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not find 'Stable tag' in readme.txt"
+            exit 1
+          fi
+          
+          echo "Target Release Version: $VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Package Plugin Directory and Inject Version
+        run: |
+          # 1. Create temporary directory matching local naming conventions
+          mkdir -p build/debisure
+          
+          # 2. Copy current codebase into it (excluding repo configurations and the build path)
+          rsync -rc --exclude='.git*' --exclude='.github' --exclude='build' ./ build/debisure/
+          
+          # 3. Swap the placeholder 0.0.1 version with the actual version inside the build directory ONLY
+          # This edits the copy going to the zip file; your git repo files remain untouched.
+          sed -i "s/\(Version:\s*\)0\.0\.1/\1${{ env.VERSION }}/g" build/debisure/debisure.php
+          
+          # 4. Zip it so that 'debisure' remains the internal folder layout
+          cd build
+          zip -r ../debisure-wp-plugin.zip debisure/
+
+      - name: Create Release and Tag
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Release v${{ env.VERSION }}
+          body: |
+            ### Debisure Integration Release v${{ env.VERSION }}
+            Automated production build triggered manually via GitHub Actions.
+            
+            *Note: Local plugin version injected dynamically from readme.txt stability headers.*
+          draft: false
+          prerelease: false
+          files: debisure-wp-plugin.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
