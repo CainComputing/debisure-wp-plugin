@@ -25,5 +25,5 @@ This plugin provides a seamless integration between Debisure services and your W
 
 ## Upgrade Notice
 
-### 1.0.0
+### 1.0.2
 Initial stable release. Install this version to begin using Debisure services.
