@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Debisure Integration
  * Description: Integrates Debisure services with WordPress.
- * Version: 0.0.1
+ * Version: 1.0.0
  * Author: Debisure
  * Author URI: https://www.debisure.com
  */
@@ -70,7 +70,24 @@ if ( file_exists( $debisure_puc_file ) ) {
         __FILE__,
         'debisure' // Must match your plugin folder slug in wp-content/plugins/debisure/
     );
-
-    // 🌟 Enable background auto-updates
-    $myUpdateChecker->enableAutoUpdate();
 }
+
+// =========================================================================
+// Cache Flush Diagnostic (Visit your site with ?debug_debisure_update=1)
+// =========================================================================
+add_action( 'admin_init', function() {
+    if ( isset( $_GET['debug_debisure_update'] ) ) {
+        global $wpdb;
+
+        delete_site_transient( 'update_plugins' );
+        delete_transient( 'update_plugins' );
+        $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_site_transient_puc_%' OR option_name LIKE '_transient_puc_%'" );
+
+        echo '<div style="background:#fff; color:#000; padding:20px; font-family:monospace; border:3px solid #000; z-index:99999; position:relative; max-width:600px; margin:40px auto;">';
+        echo '<h2>✔ Success: All WordPress & PUC Cache Transients Wiped!</h2>';
+        echo '<p>The update checker cache has been cleared. You can now return to the plugins page.</p>';
+        echo '<p><a href="' . esc_url(admin_url('plugins.php')) . '" style="display:inline-block; background:#0073aa; color:#fff; padding:10px 15px; text-decoration:none; border-radius:3px;">Return to Plugins Panel</a></p>';
+        echo '</div>';
+        exit;
+    }
+});
