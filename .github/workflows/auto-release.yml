@@ -18,7 +18,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v2
         with:
-          fetch-depth: 0 # Required to fetch git commit logs and tag decorations
+          fetch-depth: 0 # Required to fetch full git history and tag decorations
 
       - name: Extract Version & Fetch Dynamic Metadata
         id: metadata
@@ -73,25 +73,33 @@ jobs:
           CLEAN_DATE=$(date -u +"%Y-%m-%d")
           echo "CLEAN_DATE=$CLEAN_DATE" >> $GITHUB_ENV
 
-      - name: Generate Changelog and Parse README
+      - name: Generate Tag-Based Changelog and Parse README
         id: parser
         run: |
-          # 1. Read last 20 commits and filter only those that have a git tag attached
-          COMMITS=""
+          # Loop through history and find commits with tags, mapping tag name to commit message
+          CHANGELOG_TXT=""
+          CHANGELOG_HTML=""
+
           while IFS='---' read -r decor subj; do
             if echo "$decor" | grep -q "tag:"; then
-              COMMITS="${COMMITS}* $subj"$'\n'
+              # Extract the specific tag name using regex/sed
+              TAG_NAME=$(echo "$decor" | sed -n 's/.*tag: \([^,)]*\).*/\1/p')
+              if [ -n "$TAG_NAME" ]; then
+                CHANGELOG_TXT="${CHANGELOG_TXT}= $TAG_NAME ="$'\n'"* $subj"$'\n'$'\n'
+                CHANGELOG_HTML="${CHANGELOG_HTML}<h4>$TAG_NAME</h4><ul><li>$subj</li></ul>"
+              fi
             fi
-          done < <(git log -n 20 --decorate=short --pretty=format:"%D---%s")
+          done < <(git log --decorate=short --pretty=format:"%D---%s")
           
-          if [ -z "$COMMITS" ]; then
-            COMMITS="* Release version ${{ env.VERSION }}"
+          if [ -z "$CHANGELOG_TXT" ]; then
+            CHANGELOG_TXT="= ${{ env.VERSION }} ="$'\n'"* Release version ${{ env.VERSION }}"
+            CHANGELOG_HTML="<h4>${{ env.VERSION }} - ${{ env.CLEAN_DATE }}</h4><ul><li>Release version ${{ env.VERSION }}</li></ul>"
           fi
           
-          # Save changelog formatted for readme.txt (removing blank lines)
-          echo "$COMMITS" | sed '/^$/d' > changelog_txt.tmp
+          echo "$CHANGELOG_TXT" > changelog_txt.tmp
+          echo "$CHANGELOG_HTML" > changelog_html.tmp
 
-          # 2. Extract Description and Installation text blocks from README.md if it exists
+          # Extract Description and Installation text blocks from README.md if it exists
           if [ -f "README.md" ]; then
             awk '/^## Description/,/^## /' README.md | grep -v '## ' > desc_section.tmp || echo "Integrates Debisure services with WordPress." > desc_section.tmp
             awk '/^## Installation/,/^## /' README.md | grep -v '## ' > install_section.tmp || echo "Upload plugin files to plugins directory." > install_section.tmp
@@ -103,7 +111,6 @@ jobs:
       - name: Assemble readme.txt and plugin.json
         run: |
           VERSION="${{ env.VERSION }}"
-          CLEAN_DATE="${{ env.CLEAN_DATE }}"
 
           DESC_TEXT=$(cat desc_section.tmp | xargs)
           INSTALL_TEXT=$(cat install_section.tmp | xargs)
@@ -129,19 +136,10 @@ $DESC_TEXT
 $INSTALL_TEXT
 
 == Changelog ==
-= $VERSION =
 $(cat changelog_txt.tmp)
 EOF
 
-          # Build proper HTML changelog for plugin.json
-          HTML_COMMITS=""
-          while IFS= read -r line; do
-            clean_item=$(echo "$line" | sed 's/^\* //')
-            HTML_COMMITS="${HTML_COMMITS}<li>$clean_item</li>"
-          done < changelog_txt.tmp
-
-          CHANGELOG_HTML="<h4>$VERSION - $CLEAN_DATE</h4><ul>$HTML_COMMITS</ul>"
-
+          CHANGELOG_HTML=$(cat changelog_html.tmp | tr '\n' ' ')
           DESC_JSON=$(echo "$DESC_TEXT" | sed 's/"/\\"/g')
           INSTALL_JSON=$(echo "$INSTALL_TEXT" | sed 's/"/\\"/g')
 
@@ -189,7 +187,7 @@ EOF
             Automated production build triggered by tag push.
             
             * **Tested WordPress Version:** ${{ env.TESTED_UP_TO }}
-            * **Changelog filtered from tagged commits.**
+            * **Changelog generated from git tags history.**
           draft: false
           prerelease: false
           files: |
