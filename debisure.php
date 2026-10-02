@@ -70,4 +70,7 @@ if ( file_exists( $debisure_puc_file ) ) {
         __FILE__,
         'debisure' // Must match your plugin folder slug in wp-content/plugins/debisure/
     );
+
+    // 🌟 Enable background auto-updates
+    $myUpdateChecker->enableAutoUpdate();
 }
