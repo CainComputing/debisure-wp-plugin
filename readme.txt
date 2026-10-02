@@ -3,7 +3,7 @@ Contributors: debisure
 Tags: integration, services, api, automation
 Requires at least: 7.1
 Tested up to: 7.1.2
-Stable tag: 1.0.2
+Stable tag: 1.0.4
 Requires PHP: 8.3
 License: GPLv2 or later
 License URI: https://gnu.org
