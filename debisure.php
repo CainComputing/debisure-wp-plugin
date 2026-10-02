@@ -12,9 +12,13 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-// Define plugin constants
-define( 'DEBISURE_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
-define( 'DEBISURE_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
+// Define plugin constants safely
+if ( ! defined( 'DEBISURE_PLUGIN_DIR' ) ) {
+    define( 'DEBISURE_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
+}
+if ( ! defined( 'DEBISURE_PLUGIN_URL' ) ) {
+    define( 'DEBISURE_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
+}
 
 /**
  * Register Activation Hook to create custom tracking table
@@ -43,43 +47,27 @@ function debisure_create_database_table() {
     dbDelta( $sql );
 }
 
-// Load modular component files
-require_once DEBISURE_PLUGIN_DIR . 'includes/class-encryption.php';
-require_once DEBISURE_PLUGIN_DIR . 'includes/class-admin.php';
-require_once DEBISURE_PLUGIN_DIR . 'includes/class-api.php';
-require_once DEBISURE_PLUGIN_DIR . 'includes/class-form.php';
-require_once DEBISURE_PLUGIN_DIR . 'includes/class-thankyou.php';
+// Load modular component files safely
+if ( file_exists( DEBISURE_PLUGIN_DIR . 'includes/class-encryption.php' ) ) {
+    require_once DEBISURE_PLUGIN_DIR . 'includes/class-encryption.php';
+    require_once DEBISURE_PLUGIN_DIR . 'includes/class-admin.php';
+    require_once DEBISURE_PLUGIN_DIR . 'includes/class-api.php';
+    require_once DEBISURE_PLUGIN_DIR . 'includes/class-form.php';
+    require_once DEBISURE_PLUGIN_DIR . 'includes/class-thankyou.php';
+}
 
 // =========================================================================
-// Explicit GitHub Updater Configuration
+// Official Plugin Update Checker Configuration (PucFactory Model)
 // =========================================================================
 
-// 1. Load the primary library initialization script
-require_once plugin_dir_path( __FILE__ ) . 'updater/plugin-update-checker.php';
+$debisure_puc_file = plugin_dir_path( __FILE__ ) . 'updater/plugin-update-checker.php';
 
-// 2. Import the explicit, production-grade GitHub VCS engine classes
-use YahnisElsts\PluginUpdateChecker\v5p7\Vcs\PluginUpdateChecker;
-use YahnisElsts\PluginUpdateChecker\v5p7\Vcs\GitHubApi;
+if ( file_exists( $debisure_puc_file ) ) {
+    require_once $debisure_puc_file;
 
-try {
-    // 3. Force create the specialized GitHub API handler instance
-    $githubApiEngine = new GitHubApi(
-        'https://github.com'
-    );
-
-    // 4. Manually bind the engine to your local plugin file and folder slug
-    $myUpdateChecker = new PluginUpdateChecker(
-        $githubApiEngine,
+    $myUpdateChecker = YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
+        'https://github.com/CainComputing/debisure-wp-plugin/releases/latest/download/plugin.json',
         __FILE__,
-        'debisure' // Your true local folder directory name
+        'debisure' // Must match your plugin folder slug in wp-content/plugins/debisure/
     );
-
-    // 5. Safely invoke the release asset pipeline
-    $myUpdateChecker->getVcsApi()->enableReleaseAssets();
-
-} catch (\Throwable $e) {
-    // Graceful error fallback to prevent future dashboard lockout loops
-    if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-        error_log( 'Debisure Updater Sync Error: ' . $e->getMessage() );
-    }
 }
