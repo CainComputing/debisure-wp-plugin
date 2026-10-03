@@ -33,61 +33,118 @@ function debisure_add_help_tabs() {
     $screen->add_help_tab( array(
         'id'      => 'debisure_help_overview',
         'title'   => 'Overview',
-        'content' => '<p><strong>Debisure Integration Settings:</strong> Enter your credentials. When saved, the plugin automatically tests them against the Debisure Auth Validate endpoint.</p>',
+        'content' => '<p><strong>Debisure Integration Settings:</strong> Enter your credentials. Entering whitespace (spaces) into any key field will clear it.</p>',
     ) );
 }
 
 add_action( 'admin_init', 'debisure_register_settings' );
 function debisure_register_settings() {
     register_setting( 'debisure_settings_group', 'debisure_client_id', 'sanitize_text_field' );
-    register_setting( 'debisure_settings_group', 'debisure_service_key', 'sanitize_text_field' );
-    register_setting( 'debisure_settings_group', 'debisure_vendor_key', 'sanitize_text_field' );
     register_setting( 'debisure_settings_group', 'debisure_callback_page_id', 'absint' );
+    
     register_setting( 'debisure_settings_group', 'debisure_api_token', 'debisure_validate_and_encrypt_token' );
+    register_setting( 'debisure_settings_group', 'debisure_service_key', 'debisure_encrypt_service_key' );
+    register_setting( 'debisure_settings_group', 'debisure_vendor_key', 'debisure_encrypt_vendor_key' );
 }
 
 /**
- * Validates credentials against API before saving. If invalid, clears the key.
+ * Encrypt and save Netcash Service Key. If spaces or empty, clears it.
+ */
+function debisure_encrypt_service_key( $new_key ) {
+    $trimmed_key = trim( $new_key );
+    $old_key     = get_option( 'debisure_service_key' );
+
+    // If explicitly cleared with spaces or empty string (while leaving field blank means keep old)
+    if ( $new_key !== '' && $trimmed_key === '' ) {
+        add_settings_error( 'debisure_service_key', 'key_cleared', 'Netcash Service Key has been cleared.', 'updated' );
+        return '';
+    }
+
+    if ( empty( $new_key ) && ! empty( $old_key ) ) {
+        return $old_key;
+    }
+
+    if ( empty( $new_key ) ) {
+        return '';
+    }
+
+    return debisure_encrypt_data( sanitize_text_field( $new_key ) );
+}
+
+/**
+ * Encrypt and save Netcash Vendor Key. If spaces or empty, clears it.
+ */
+function debisure_encrypt_vendor_key( $new_key ) {
+    $trimmed_key = trim( $new_key );
+    $old_key     = get_option( 'debisure_vendor_key' );
+
+    if ( $new_key !== '' && $trimmed_key === '' ) {
+        add_settings_error( 'debisure_vendor_key', 'key_cleared', 'Netcash Vendor Key has been cleared.', 'updated' );
+        return '';
+    }
+
+    if ( empty( $new_key ) && ! empty( $old_key ) ) {
+        return $old_key;
+    }
+
+    if ( empty( $new_key ) ) {
+        return '';
+    }
+
+    return debisure_encrypt_data( sanitize_text_field( $new_key ) );
+}
+
+/**
+ * Validates credentials against API before saving. If invalid or cleared with spaces, clears the key.
  */
 function debisure_validate_and_encrypt_token( $new_token ) {
-    $new_token = sanitize_text_field( $new_token );
-    $old_token = get_option( 'debisure_api_token' );
+    $trimmed_token = trim( $new_token );
+    $old_token     = get_option( 'debisure_api_token' );
     
+    // If user typed spaces to clear the key
+    if ( $new_token !== '' && $trimmed_token === '' ) {
+        add_settings_error(
+            'debisure_api_token',
+            'api_token_cleared',
+            'Debisure API Key has been cleared.',
+            'updated'
+        );
+        return '';
+    }
+
     // Gather inputs from POST
     $client_id   = isset( $_POST['debisure_client_id'] ) ? sanitize_text_field( $_POST['debisure_client_id'] ) : get_option( 'debisure_client_id' );
-    $service_key = isset( $_POST['debisure_service_key'] ) ? sanitize_text_field( $_POST['debisure_service_key'] ) : get_option( 'debisure_service_key' );
-    $vendor_key  = isset( $_POST['debisure_vendor_key'] ) ? sanitize_text_field( $_POST['debisure_vendor_key'] ) : get_option( 'debisure_vendor_key' );
+    
+    // Evaluate service/vendor keys (checking if user cleared them with spaces during this post)
+    $posted_service = $_POST['debisure_service_key'] ?? '';
+    $posted_vendor  = $_POST['debisure_vendor_key'] ?? '';
+    
+    $service_key = ( trim( $posted_service ) !== '' ) ? sanitize_text_field( $posted_service ) : ( $posted_service !== '' ? '' : debisure_get_service_key() );
+    $vendor_key  = ( trim( $posted_vendor ) !== '' ) ? sanitize_text_field( $posted_vendor ) : ( $posted_vendor !== '' ? '' : debisure_get_vendor_key() );
     
     // Determine which token to test
-    $token_to_test = ! empty( $new_token ) ? $new_token : debisure_get_api_token();
+    $token_to_test = ( $trimmed_token !== '' ) ? sanitize_text_field( $new_token ) : debisure_get_api_token();
 
-    // If no token exists at all, return empty
     if ( empty( $token_to_test ) ) {
         return '';
     }
 
-    // If the field was left blank/placeholder and we already have a token saved, keep it unless client ID changed
     if ( empty( $new_token ) && ! empty( $old_token ) ) {
         return $old_token;
     }
 
-    // Force live test against API auth validate endpoint
     $validation = debisure_validate_api_credentials( $client_id, $service_key, $vendor_key, $token_to_test );
 
     if ( is_wp_error( $validation ) ) {
-        // Validation failed: clear the stored token and show error notice
         add_settings_error(
             'debisure_api_token',
             'api_validation_failed',
             'Credential Validation Failed: ' . $validation->get_error_message(),
             'error'
         );
-        
-        // Return empty string to clear it from the database
         return '';
     }
 
-    // Success! Encrypt and save the new token
     add_settings_error(
         'debisure_api_token',
         'api_validation_success',
@@ -118,7 +175,10 @@ function debisure_settings_page_html() {
         return;
     }
     
-    $has_token        = get_option( 'debisure_api_token' ) ? true : false;
+    $has_token       = get_option( 'debisure_api_token' ) ? true : false;
+    $has_service_key = get_option( 'debisure_service_key' ) ? true : false;
+    $has_vendor_key  = get_option( 'debisure_vendor_key' ) ? true : false;
+    
     $selected_page_id = get_option( 'debisure_callback_page_id' );
     $callback_url     = $selected_page_id ? get_permalink( $selected_page_id ) : '';
     ?>
@@ -129,7 +189,7 @@ function debisure_settings_page_html() {
 
         <div class="notice notice-info inline" style="margin: 15px 0 20px 0; padding: 12px;">
             <h3>Credentials Verification & Callbacks</h3>
-            <p>When you update your API credentials and click <strong>Save Changes</strong>, WordPress will test them against the <code>/api/v1/auth/validate</code> endpoint. Invalid keys will be automatically cleared.</p>
+            <p>Type spaces into any key field and save to clear it. Valid keys are encrypted and tested against the <code>/api/v1/auth/validate</code> endpoint.</p>
         </div>
 
         <form action="options.php" method="post">
@@ -168,7 +228,7 @@ function debisure_settings_page_html() {
                         <input type="text" id="debisure_api_token" name="debisure_api_token" value="" placeholder="<?php echo $has_token ? '******** (Saved & Verified)' : ''; ?>" class="regular-text" autocomplete="off" spellcheck="false" />
                         <p class="description">
                             <?php if ( $has_token ) : ?>
-                                <strong>Credentials are verified and securely saved.</strong> Enter a new key to re-verify and update.
+                                <strong>Credentials are verified and securely saved.</strong> Enter a new key to update, or type a space to clear.
                             <?php else : ?>
                                 Enter your API key. It will be tested against the validation endpoint before saving.
                             <?php endif; ?>
@@ -178,15 +238,27 @@ function debisure_settings_page_html() {
                 <tr valign="top">
                     <th scope="row"><label for="debisure_service_key">Netcash Service Key</label></th>
                     <td>
-                        <input type="text" id="debisure_service_key" name="debisure_service_key" value="<?php echo esc_attr( get_option('debisure_service_key') ); ?>" class="regular-text" autocomplete="off" />
-                        <p class="description"><em>Note: Netcash details are stored for API requests and are not live-verified during save.</em></p>
+                        <input type="text" id="debisure_service_key" name="debisure_service_key" value="" placeholder="<?php echo $has_service_key ? '******** (Saved)' : ''; ?>" class="regular-text" autocomplete="off" spellcheck="false" />
+                        <p class="description">
+                            <?php if ( $has_service_key ) : ?>
+                                <strong>Securely saved.</strong> Enter a new key to update, or type a space to clear.
+                            <?php else : ?>
+                                Enter your Netcash Service Key.
+                            <?php endif; ?>
+                        </p>
                     </td>
                 </tr>
                 <tr valign="top">
                     <th scope="row"><label for="debisure_vendor_key">Netcash Vendor Key</label></th>
                     <td>
-                        <input type="text" id="debisure_vendor_key" name="debisure_vendor_key" value="<?php echo esc_attr( get_option('debisure_vendor_key') ); ?>" class="regular-text" autocomplete="off" />
-                        <p class="description"><em>Note: Netcash details are stored for API requests and are not live-verified during save.</em></p>
+                        <input type="text" id="debisure_vendor_key" name="debisure_vendor_key" value="" placeholder="<?php echo $has_vendor_key ? '******** (Saved)' : ''; ?>" class="regular-text" autocomplete="off" spellcheck="false" />
+                        <p class="description">
+                            <?php if ( $has_vendor_key ) : ?>
+                                <strong>Securely saved.</strong> Enter a new key to update, or type a space to clear.
+                            <?php else : ?>
+                                Enter your Netcash Vendor Key.
+                            <?php endif; ?>
+                        </p>
                     </td>
                 </tr>
             </table>

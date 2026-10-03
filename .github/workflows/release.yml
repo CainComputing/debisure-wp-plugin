@@ -160,7 +160,13 @@ jobs:
       - name: Package Plugin Directory and Inject Version
         run: |
           mkdir -p build/debisure
-          rsync -rc --exclude='.git*' --exclude='.github' --exclude='build' ./ build/debisure/
+          rsync -rc \
+            --exclude='.git*' \
+            --exclude='.github' \
+            --exclude='build' \
+            --exclude='*.tmp' \
+            --exclude='*.tmp.*' \
+            ./ build/debisure/
 
           # Drop the generated readme.txt into the package bundle
           cp readme.txt build/debisure/readme.txt
