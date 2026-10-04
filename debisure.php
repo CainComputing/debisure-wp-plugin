@@ -3,7 +3,7 @@
  * Plugin Name: Debisure Integration
  * Description: Integrates Debisure services with WordPress.
  * Version: 0.0.1
- * Requires PHP: 8.3
+ * Requires PHP: 8.2
  * Author: Debisure
  * Author URI: https://www.debisure.com
  */

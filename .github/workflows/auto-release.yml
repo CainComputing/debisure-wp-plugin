@@ -44,7 +44,7 @@ jobs:
           # 2. Extract PHP Version requirement from debisure.php header comments
           PHP_REQ=$(grep -i "Requires PHP:" debisure.php | awk -F': ' '{print $2}' | xargs)
           if [ -z "$PHP_REQ" ]; then
-            PHP_REQ="7.4" # Fallback safety default
+            PHP_REQ="8.2" # Fallback safety default
           fi
           echo "PHP_REQUIREMENT=$PHP_REQ" >> $GITHUB_ENV
           echo "Required PHP Version: $PHP_REQ"
