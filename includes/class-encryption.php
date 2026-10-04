@@ -39,3 +39,13 @@ function debisure_get_api_token() {
     $encrypted_token = get_option( 'debisure_api_token' );
     return debisure_decrypt_data( $encrypted_token );
 }
+
+function debisure_get_service_key() {
+    $encrypted = get_option( 'debisure_service_key' );
+    return debisure_decrypt_data( $encrypted );
+}
+
+function debisure_get_vendor_key() {
+    $encrypted = get_option( 'debisure_vendor_key' );
+    return debisure_decrypt_data( $encrypted );
+}
