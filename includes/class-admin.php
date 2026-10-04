@@ -16,14 +16,17 @@ function debisure_admin_menus() {
         100
     );
 
-    $mandates_page = add_submenu_page(
-        'debisure-splash',
-        'Debisure Mandates',
-        'Mandates',
-        'manage_options',
-        'debisure-mandates',
-        'debisure_mandates_page_html'
-    );
+    $mandates_page = false;
+    if ( debisure_has_activation_credentials() ) {
+        $mandates_page = add_submenu_page(
+            'debisure-splash',
+            'Debisure Mandates',
+            'Mandates',
+            'manage_options',
+            'debisure-mandates',
+            'debisure_mandates_page_html'
+        );
+    }
 
     $settings_page = add_submenu_page(
         'debisure-splash',
@@ -454,6 +457,10 @@ function debisure_mandates_page_html() {
     if ( ! current_user_can( 'manage_options' ) ) {
         return;
     }
+    if ( ! debisure_has_activation_credentials() ) {
+        echo '<div class="wrap"><div class="notice notice-warning"><p>Please activate the plugin with your API key to use these features.</p></div></div>';
+        return;
+    }
 
     global $wpdb;
     $table_name = $wpdb->prefix . 'debisure';
@@ -872,7 +879,7 @@ function debisure_settings_page_html() {
             <p>Please enter your Client ID and API Key to activate this plugin.</p>
         </div>
         <?php if ( ! $has_activation_credentials ) : ?>
-            <div class="notice notice-warning inline"><p>Form Builder and Status are unavailable until both Client ID and Debisure API Key are saved.</p></div>
+            <div class="notice notice-warning inline"><p>Please activate the plugin with your API key to use these features.</p></div>
         <?php endif; ?>
 
         <form action="options.php" method="post">
