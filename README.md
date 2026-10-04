@@ -24,7 +24,7 @@ Add `[debisure_form]` to the WordPress page where customers should complete a ma
 
 Create or choose the page customers should see when they return from Debisure, and add `[debisure_return]` to that page. Set the return page in your Debisure client settings.
 
-For testing, a logged-in site administrator can open the return page with `?testid=test`, `?testid=testfail`, or `?testid=testpending` to preview sample successful, failed, or pending mandate details. Use `?testid=MANDATE_REFERENCE` to display a saved mandate. Samples are shown only for preview and are not stored in the database. Customers and other visitors cannot use these test views.
+When a logged-in site administrator previews the return page without a mandate reference, the shortcode displays sample successful mandate details automatically. For other sample states, use `?testid=testfail` or `?testid=testpending`. Use `?testid=MANDATE_REFERENCE` to display a saved mandate. Samples are shown only for preview and are not stored in the database. Customers and other visitors cannot use these test views.
 
 ## Manage mandates
 

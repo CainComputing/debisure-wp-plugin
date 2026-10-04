@@ -34,12 +34,20 @@ function debisure_render_thankyou_shortcode() {
     }
     $mandate = null;
     $test_case = strtolower( $reference );
+    $is_admin_preview = ! $is_test_request
+        && '' === $reference
+        && current_user_can( 'manage_options' );
+    if ( $is_admin_preview ) {
+        $test_case = 'test';
+    }
     $mock_statuses = array(
         'test'        => 'success',
         'testfail'    => 'failed',
         'testpending' => 'pending',
     );
-    if ( isset( $mock_statuses[ $test_case ] ) && ! $test_access_denied ) {
+    $is_mock_preview = false;
+    $can_view_mock = $is_admin_preview || ( $is_test_request && ! $test_access_denied );
+    if ( isset( $mock_statuses[ $test_case ] ) && $can_view_mock ) {
         $mandate = (object) array(
             'account_reference'     => 'TEST-DEBISURE-' . strtoupper( $test_case ),
             'is_individual'         => 1,
@@ -50,6 +58,7 @@ function debisure_render_thankyou_shortcode() {
             'status'                => $mock_statuses[ $test_case ],
             'mandate_pdf'           => 'https://debisure.com/',
         );
+        $is_mock_preview = true;
     } elseif ( '' !== $reference && ! $test_access_denied ) {
         $table_name = $wpdb->prefix . 'debisure';
         $mandate = $wpdb->get_row( $wpdb->prepare(
@@ -85,7 +94,7 @@ function debisure_render_thankyou_shortcode() {
                 <h2 class="debisure-thankyou-title">Test View Unavailable</h2>
                 <p class="debisure-thankyou-message">Test access is restricted to site administrators.</p>
             <?php else : ?>
-                <?php if ( isset( $mock_statuses[ $test_case ] ) && $mandate ) : ?>
+                <?php if ( $is_mock_preview ) : ?>
                     <p class="debisure-thankyou-message">Test preview using sample mandate details.</p>
                 <?php endif; ?>
                 <?php if ( ! $mandate ) : ?>
