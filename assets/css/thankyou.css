@@ -1,0 +1,144 @@
+/* Thank-you card */
+.debisure-thankyou {
+    box-sizing: border-box;
+    max-width: 600px;
+    margin: 30px auto;
+    padding: 35px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+    color: #1a202c;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.debisure-thankyou *,
+.debisure-thankyou *::before,
+.debisure-thankyou *::after {
+    box-sizing: border-box;
+}
+
+/* Result heading and message */
+.debisure-thankyou-header {
+    margin-bottom: 25px;
+    text-align: center;
+}
+
+.debisure-thankyou-icon {
+    display: inline-flex;
+    width: 56px;
+    height: 56px;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12px;
+    border: 2px solid currentColor;
+    border-radius: 50%;
+    font-size: 28px;
+    font-weight: 700;
+}
+
+.debisure-thankyou-icon--success {
+    color: #2f855a;
+}
+
+.debisure-thankyou-icon--issue {
+    color: #e53e3e;
+}
+
+.debisure-thankyou-title {
+    margin: 0 0 10px;
+    color: #2d3748;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+.debisure-thankyou-message {
+    margin: 0;
+    color: #4a5568;
+    font-size: 14px;
+}
+
+/* Mandate details */
+.debisure-thankyou-details {
+    margin: 0 0 25px;
+    padding: 15px 20px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.debisure-thankyou-detail {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 6px 16px;
+    padding: 10px 0;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.debisure-thankyou-detail:last-child {
+    border-bottom: 0;
+}
+
+.debisure-thankyou-label {
+    color: #4a5568;
+    font-size: 14px;
+}
+
+.debisure-thankyou-value {
+    margin: 0;
+    color: #1a202c;
+    font-size: 14px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.debisure-thankyou--success .debisure-thankyou-detail--status .debisure-thankyou-value {
+    color: #2f855a;
+}
+
+.debisure-thankyou--issue .debisure-thankyou-detail--status .debisure-thankyou-value {
+    color: #e53e3e;
+}
+
+/* Mandate PDF link */
+.debisure-thankyou-download {
+    margin: 0;
+    text-align: left;
+}
+
+.debisure-thankyou-download-link {
+    display: inline-block;
+    padding: 14px 28px;
+    border-radius: 6px;
+    background: #2b6cb0;
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.debisure-thankyou-download-link:hover {
+    background: #2c5282;
+    color: #ffffff;
+}
+
+.debisure-thankyou-download-link:active {
+    transform: scale(0.98);
+}
+
+/* Small-screen spacing */
+@media (max-width: 600px) {
+    .debisure-thankyou {
+        padding: 24px 20px;
+    }
+
+    .debisure-thankyou-detail {
+        display: block;
+    }
+
+    .debisure-thankyou-value {
+        margin-top: 4px;
+    }
+}

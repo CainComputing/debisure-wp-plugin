@@ -1,0 +1,196 @@
+name: Auto Release on Tag
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+*' # Triggers on any semantic tag push, e.g., 1.0.5, 1.0.6
+
+env:
+  REQUIRES_AT_LEAST: "6.0" # Configure your minimum required WordPress version here
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create the release and upload assets
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # Required to fetch full git history and tag decorations
+
+      - name: Extract Version & Fetch Dynamic Metadata
+        id: metadata
+        run: |
+          TAG_REF="${{ github.ref_name }}"
+          VERSION="${TAG_REF#v}"
+          
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not determine version from tag."
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Target Release Version: $VERSION"
+
+          # 1. Fetch Latest WordPress Version from official API
+          WP_TESTED=$(curl -s https://api.wordpress.org/core/version-check/1.7/ | grep -o '"version":"[^"]*"' | head -n 1 | cut -d'"' -f4 | cut -d'.' -f1-2)
+          if [ -z "$WP_TESTED" ]; then
+            WP_TESTED="6.5" # Fallback safety default
+          fi
+          echo "TESTED_UP_TO=$WP_TESTED" >> $GITHUB_ENV
+          echo "Latest WordPress Tested Version: $WP_TESTED"
+
+          # 2. Extract PHP Version requirement from debisure.php header comments
+          PHP_REQ=$(grep -i "Requires PHP:" debisure.php | awk -F': ' '{print $2}' | xargs)
+          if [ -z "$PHP_REQ" ]; then
+            PHP_REQ="7.4" # Fallback safety default
+          fi
+          echo "PHP_REQUIREMENT=$PHP_REQ" >> $GITHUB_ENV
+          echo "Required PHP Version: $PHP_REQ"
+
+          # 3. Detect License information from repo LICENSE file
+          REPO_NAME="${{ github.repository }}"
+          LICENSE_URI="https://github.com/$REPO_NAME/blob/main/LICENSE"
+          echo "LICENSE_URI=$LICENSE_URI" >> $GITHUB_ENV
+
+          LICENSE_TYPE="GPLv2 or later"
+          if [ -f "LICENSE" ]; then
+            if grep -qi "MIT" LICENSE; then
+              LICENSE_TYPE="MIT"
+            elif grep -qi "Apache" LICENSE; then
+              LICENSE_TYPE="Apache 2.0"
+            elif grep -qi "GPL" LICENSE; then
+              LICENSE_TYPE="GPLv2 or later"
+            fi
+          fi
+          echo "LICENSE_TYPE=$LICENSE_TYPE" >> $GITHUB_ENV
+
+          # 4. Timestamps
+          CURRENT_DATE=$(date -u +"%Y-%m-%d %H:%M:%S")
+          echo "CURRENT_DATE=$CURRENT_DATE" >> $GITHUB_ENV
+
+          CLEAN_DATE=$(date -u +"%Y-%m-%d")
+          echo "CLEAN_DATE=$CLEAN_DATE" >> $GITHUB_ENV
+
+          RELEASE_COMMIT_MESSAGE=$(git log -1 --format=%s "$GITHUB_SHA")
+          if [ -z "$RELEASE_COMMIT_MESSAGE" ]; then
+            echo "Error: Could not determine the tagged commit message."
+            exit 1
+          fi
+          echo "RELEASE_COMMIT_MESSAGE=$RELEASE_COMMIT_MESSAGE" >> $GITHUB_ENV
+      - name: Generate Tag-Based Changelog and Parse README
+        id: parser
+        run: |
+          CHANGELOG_TXT="= $VERSION ="$'\n'"* $RELEASE_COMMIT_MESSAGE"
+          CHANGELOG_HTML="<h4>$VERSION</h4><ul><li>$RELEASE_COMMIT_MESSAGE</li></ul>"
+          
+          echo "$CHANGELOG_TXT" > changelog_txt.tmp
+          echo "$CHANGELOG_HTML" > changelog_html.tmp
+
+          {
+            echo "### Debisure Integration Release $VERSION"
+            echo
+            echo "$RELEASE_COMMIT_MESSAGE"
+            echo
+            echo "* **Tested WordPress Version:** $TESTED_UP_TO"
+          } > release-body.tmp
+
+          # Extract Description and Installation text blocks from README.md if it exists
+          if [ -f "README.md" ]; then
+            awk '/^## Description/,/^## /' README.md | grep -v '## ' > desc_section.tmp || echo "Integrates Debisure services with WordPress." > desc_section.tmp
+            awk '/^## Installation/,/^## /' README.md | grep -v '## ' > install_section.tmp || echo "Upload plugin files to plugins directory." > install_section.tmp
+          else
+            echo "This plugin provides seamless integration between Debisure services and WordPress." > desc_section.tmp
+            echo "Upload the plugin zip file through your WordPress plugins panel." > install_section.tmp
+          fi
+
+      - name: Assemble readme.txt and plugin.json
+        run: |
+          VERSION="${{ env.VERSION }}"
+
+          DESC_TEXT=$(cat desc_section.tmp | xargs)
+          INSTALL_TEXT=$(cat install_section.tmp | xargs)
+
+          # Build readme.txt cleanly against left margin
+          cat <<EOF > readme.txt
+          === Debisure Integration ===
+          Contributors: CainComputing
+          Tags: debisure, integration, security, management
+          Requires at least: ${{ env.REQUIRES_AT_LEAST }}
+          Tested up to: ${{ env.TESTED_UP_TO }}
+          Requires PHP: ${{ env.PHP_REQUIREMENT }}
+          Stable tag: $VERSION
+          License: ${{ env.LICENSE_TYPE }}
+          License URI: ${{ env.LICENSE_URI }}
+
+          Integrates Debisure services with WordPress.
+
+          == Description ==
+          $DESC_TEXT
+
+          == Installation ==
+          $INSTALL_TEXT
+
+          == Changelog ==
+          $(cat changelog_txt.tmp)
+          EOF
+
+          CHANGELOG_HTML=$(cat changelog_html.tmp | tr '\n' ' ')
+          DESC_JSON=$(echo "$DESC_TEXT" | sed 's/"/\\"/g')
+          INSTALL_JSON=$(echo "$INSTALL_TEXT" | sed 's/"/\\"/g')
+
+          # Build plugin.json cleanly against left margin
+          cat <<EOF > plugin.json
+          {
+            "name": "Debisure Integration",
+            "version": "$VERSION",
+            "download_url": "https://github.com/${{ github.repository }}/releases/download/$VERSION/debisure-wp-plugin.zip",
+            "homepage": "https://www.debisure.com",
+            "requires": "${{ env.REQUIRES_AT_LEAST }}",
+            "tested": "${{ env.TESTED_UP_TO }}",
+            "last_updated": "${{ env.CURRENT_DATE }}",
+            "author": "Debisure",
+            "author_homepage": "https://www.debisure.com",
+            "sections": {
+              "description": "$DESC_JSON",
+              "installation": "$INSTALL_JSON",
+              "changelog": "$CHANGELOG_HTML"
+            }
+          }
+          EOF
+
+      - name: Package Plugin Directory and Inject Version
+        run: |
+          mkdir -p build/debisure
+          rsync -rc \
+            --exclude='.git*' \
+            --exclude='.github' \
+            --exclude='build' \
+            --exclude='*.tmp' \
+            --exclude='*.tmp.*' \
+            ./ build/debisure/
+
+          # Drop the generated readme.txt into the package bundle
+          cp readme.txt build/debisure/readme.txt
+
+          # Dynamically swap the version header inside debisure.php
+          sed -i "s/\(Version:\s*\)[0-9]\+\.[0-9]\+\.[0-9]\+/\1${{ env.VERSION }}/g" build/debisure/debisure.php
+
+          cd build
+          zip -r ../debisure-wp-plugin.zip debisure/
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: Release ${{ env.VERSION }}
+          body_path: release-body.tmp
+          draft: false
+          prerelease: false
+          files: |
+            debisure-wp-plugin.zip
+            plugin.json
+            readme.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

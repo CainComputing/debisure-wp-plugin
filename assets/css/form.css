@@ -1,0 +1,183 @@
+.debisure-form-wrapper {
+    box-sizing: border-box;
+    width: min(100% - 2rem, 34rem);
+    margin: 1.25rem auto;
+    padding: clamp(1rem, 3vw, 1.5rem);
+    border: 1px solid #dce3ea;
+    border-radius: 0.85rem;
+    background: #fff;
+    color: #243246;
+    box-shadow: 0 0.75rem 2rem rgb(24 39 58 / 8%);
+    font-family: inherit;
+}
+
+.debisure-form-wrapper *,
+.debisure-form-wrapper *::before,
+.debisure-form-wrapper *::after {
+    box-sizing: border-box;
+}
+
+.debisure-form-wrapper [hidden] {
+    display: none !important;
+}
+
+.debisure-form {
+    margin: 0;
+}
+
+.debisure-form-row {
+    margin: 0 0 0.75rem;
+}
+
+.debisure-form-row > label,
+.debisure-custom-amount > label {
+    display: block;
+    margin: 0 0 0.3rem;
+    color: #26364a;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.debisure-form-row input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+.debisure-form-row select,
+.debisure-custom-amount input {
+    display: block;
+    width: 100%;
+    min-height: 2.4rem;
+    margin: 0;
+    padding: 0.45rem 0.65rem;
+    border: 1px solid #cbd5df;
+    border-radius: 0.45rem;
+    background: #fff;
+    color: #1d2939;
+    font: inherit;
+    line-height: 1.4;
+}
+
+.debisure-form-row input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+.debisure-custom-amount input {
+    min-height: 2.16rem;
+    padding: 0.405rem 0.585rem;
+    font-size: 90%;
+}
+
+.debisure-form-row input:focus,
+.debisure-form-row select:focus,
+.debisure-custom-amount input:focus {
+    border-color: #2872a8;
+    outline: 3px solid rgb(40 114 168 / 18%);
+    outline-offset: 1px;
+}
+
+.debisure-form-row .description {
+    margin: 0.4rem 0 0;
+    color: #667589;
+    font-size: 0.875rem;
+}
+
+.debisure-checkbox-row label {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0;
+    color: #344256;
+    font-weight: 400;
+    cursor: pointer;
+}
+
+.debisure-checkbox-row input[type="checkbox"],
+.debisure-amount-options input[type="radio"] {
+    flex: 0 0 auto;
+    width: 1.1rem;
+    height: 1.1rem;
+    margin: 0;
+    accent-color: #246b9b;
+}
+
+.debisure-required-fields-note {
+    margin: 0 0 1.2rem;
+    color: #586779;
+    font-size: 0.875rem;
+}
+
+.debisure-required-asterisk,
+.debisure-required-fields-asterisk,
+.debisure-required-fields-text {
+    color: #b4232f;
+    font-weight: 700;
+}
+
+.debisure-required-asterisk {
+    margin-left: 0.15rem;
+}
+
+.debisure-amount-options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.9rem;
+}
+
+.debisure-amount-options > label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0;
+    color: #344256;
+    font-weight: 400;
+    cursor: pointer;
+}
+
+.debisure-amount-options .debisure-custom-amount {
+    flex: 0 0 100%;
+    margin-top: 0.25rem;
+}
+
+.debisure-form-submit-row {
+    margin-top: 1rem;
+}
+
+.debisure-submit-button {
+    display: inline-flex;
+    width: 100%;
+    min-height: 2.5rem;
+    align-items: center;
+    justify-content: center;
+    padding: 0.6rem 1rem;
+    border: 0;
+    border-radius: 0.45rem;
+    background: #246b9b;
+    color: #fff;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.debisure-submit-button:hover {
+    background: #194f76;
+}
+
+.debisure-submit-button:focus-visible {
+    outline: 3px solid rgb(40 114 168 / 35%);
+    outline-offset: 2px;
+}
+
+.debisure-submit-button:disabled {
+    background: #8996a5;
+    cursor: not-allowed;
+}
+
+#debisure-form-messages div {
+    padding: 0.75rem 0.9rem;
+    border-radius: 0.45rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+@media (max-width: 30rem) {
+    .debisure-form-wrapper {
+        width: min(100% - 1rem, 37.5rem);
+        margin: 1rem auto;
+    }
+}
