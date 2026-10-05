@@ -49,3 +49,15 @@ function debisure_get_vendor_key() {
     $encrypted = get_option( 'debisure_vendor_key' );
     return debisure_decrypt_data( $encrypted );
 }
+
+function debisure_get_recaptcha_settings() {
+    $saved = get_option( 'debisure_recaptcha_settings', array() );
+    if ( ! is_array( $saved ) ) {
+        $saved = array();
+    }
+
+    return array(
+        'site_key'   => is_string( $saved['site_key'] ?? null ) ? $saved['site_key'] : '',
+        'secret_key' => debisure_decrypt_data( is_string( $saved['secret_key'] ?? null ) ? $saved['secret_key'] : '' ),
+    );
+}

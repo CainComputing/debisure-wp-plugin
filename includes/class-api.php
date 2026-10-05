@@ -296,6 +296,58 @@ function debisure_validate_api_credentials( $client_id, $service_key, $vendor_ke
 add_action( 'wp_ajax_debisure_submit_form', 'debisure_handle_form_submission' );
 add_action( 'wp_ajax_nopriv_debisure_submit_form', 'debisure_handle_form_submission' );
 
+function debisure_verify_recaptcha_v3( $token ) {
+    $settings = debisure_get_recaptcha_settings();
+    $has_site_key = '' !== $settings['site_key'];
+    $has_secret_key = '' !== $settings['secret_key'];
+
+    if ( ! $has_site_key && ! $has_secret_key ) {
+        return true;
+    }
+    if ( ! $has_site_key || ! $has_secret_key ) {
+        return new WP_Error( 'recaptcha_incomplete_config', 'Both reCAPTCHA keys must be configured.' );
+    }
+    if ( ! is_string( $token ) || '' === trim( $token ) ) {
+        return new WP_Error( 'recaptcha_missing_token', 'reCAPTCHA verification token is missing.' );
+    }
+
+    $response = wp_remote_post(
+        'https://www.google.com/recaptcha/api/siteverify',
+        array(
+            'timeout' => 10,
+            'body'    => array(
+                'secret'   => $settings['secret_key'],
+                'response' => $token,
+            ),
+        )
+    );
+    if ( is_wp_error( $response ) ) {
+        error_log( 'Debisure reCAPTCHA verification request failed: ' . $response->get_error_message() );
+        return new WP_Error( 'recaptcha_service_unavailable', 'reCAPTCHA verification is temporarily unavailable.' );
+    }
+
+    if ( 200 !== wp_remote_retrieve_response_code( $response ) ) {
+        error_log( 'Debisure reCAPTCHA verification returned HTTP ' . wp_remote_retrieve_response_code( $response ) . '.' );
+        return new WP_Error( 'recaptcha_service_unavailable', 'reCAPTCHA verification is temporarily unavailable.' );
+    }
+
+    $result = json_decode( wp_remote_retrieve_body( $response ), true );
+    $site_host = strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
+    if (
+        ! is_array( $result )
+        || true !== ( $result['success'] ?? false )
+        || 'mandate_submit' !== ( $result['action'] ?? '' )
+        || ! is_numeric( $result['score'] ?? null )
+        || (float) $result['score'] < 0.5
+        || '' === $site_host
+        || strtolower( (string) ( $result['hostname'] ?? '' ) ) !== $site_host
+    ) {
+        return new WP_Error( 'recaptcha_rejected', 'reCAPTCHA verification failed. Please try again.' );
+    }
+
+    return true;
+}
+
 function debisure_handle_form_submission() {
     global $wpdb;
     $table_name = $wpdb->prefix . 'debisure';
@@ -305,6 +357,17 @@ function debisure_handle_form_submission() {
 
     if ( ! is_array( $data ) || empty( $data ) ) {
         wp_send_json_error( 'Invalid form data received.' );
+    }
+
+    $recaptcha_token = $data['recaptchaToken'] ?? '';
+    unset( $data['recaptchaToken'] );
+    $recaptcha_result = debisure_verify_recaptcha_v3( $recaptcha_token );
+    if ( is_wp_error( $recaptcha_result ) ) {
+        if ( 'recaptcha_incomplete_config' === $recaptcha_result->get_error_code() ) {
+            error_log( 'Debisure form submission rejected: reCAPTCHA keys are only partially configured.' );
+            wp_send_json_error( 'The form security check is not configured correctly. Please contact the site administrator.' );
+        }
+        wp_send_json_error( $recaptcha_result->get_error_message() );
     }
 
     $field_settings = debisure_get_form_fields();
@@ -341,7 +404,11 @@ function debisure_handle_form_submission() {
             } elseif ( ! is_bool( $data[ $field_name ] ) && ! in_array( $data[ $field_name ], array( 0, 1, '0', '1', 'true', 'false' ), true ) ) {
                 wp_send_json_error( 'Invalid value for ' . $definition['label'] . '.' );
             } else {
-                $data[ $field_name ] = in_array( $data[ $field_name ], array( true, 1, '1', 'true' ), true );
+                $checkbox_value = in_array( $data[ $field_name ], array( true, 1, '1', 'true' ), true );
+                if ( ! empty( $definition['custom_field'] ) && ! empty( $field_settings[ $field_name ]['required'] ) && ! $checkbox_value ) {
+                    wp_send_json_error( $definition['label'] . ' is required.' );
+                }
+                $data[ $field_name ] = $checkbox_value;
             }
             continue;
         }
@@ -401,12 +468,19 @@ function debisure_handle_form_submission() {
         wp_send_json_error( 'MandateName is required.' );
     }
 
+    $custom_field_values = array();
+    foreach ( $field_definitions as $field_name => $definition ) {
+        if ( ! empty( $definition['custom_field'] ) && array_key_exists( $field_name, $data ) ) {
+            $custom_field_values[ $field_name ] = $data[ $field_name ];
+        }
+    }
+
     unset( $data['isBusinessAccount'], $data['decemberDebitDay'] );
     $data['isIndividual'] = ! $is_business_account;
 
     $allowed_fields = array( 'accountReference', 'isIndividual', 'mandateName' );
     foreach ( $field_definitions as $field_name => $definition ) {
-        if ( ! empty( $definition['system_managed'] ) ) {
+        if ( ! empty( $definition['system_managed'] ) || ! empty( $definition['custom_field'] ) ) {
             continue;
         }
         if ( ! empty( $field_settings[ $field_name ]['enabled'] ) ) {
@@ -480,34 +554,40 @@ function debisure_handle_form_submission() {
     $response_body = wp_remote_retrieve_body( $response );
 
     if ( $response_code >= 200 && $response_code < 300 ) {
-        $inserted = $wpdb->insert(
-            $table_name,
-            array(
-                'account_reference'       => $account_reference,
-                'mandate_name'            => sanitize_text_field( $data['mandateName'] ?? '' ),
-                'is_individual'           => ! empty( $data['isIndividual'] ) ? 1 : 0,
-                'first_name'              => sanitize_text_field( $data['firstName'] ?? '' ),
-                'surname'                 => sanitize_text_field( $data['surname'] ?? '' ),
-                'business_account_name'   => sanitize_text_field( $data['businessAccountName'] ?? '' ),
-                'business_account_reg_no' => sanitize_text_field( $data['businessAccountRegNo'] ?? '' ),
-                'business_account_reg_name' => sanitize_text_field( $data['businessAccountRegName'] ?? '' ),
-                'mobile_no'               => sanitize_text_field( $data['mobileNo'] ?? '' ),
-                'email_address'           => sanitize_email( $data['emailAddress'] ?? '' ),
-                'building'                => sanitize_text_field( $data['building'] ?? '' ),
-                'street'                  => sanitize_text_field( $data['street'] ?? '' ),
-                'city'                    => sanitize_text_field( $data['city'] ?? '' ),
-                'province'                => sanitize_text_field( $data['province'] ?? '' ),
-                'postal_code'             => sanitize_text_field( $data['postalCode'] ?? '' ),
-                'debit_day'               => sanitize_text_field( $data['debitDay'] ?? '' ),
-                'amount'                  => (float) ( $data['mandateAmount'] ?? 0 ),
-                'agreement_date'          => '',
-                'mandate_reference'       => '',
-                'reason_for_decline'      => '',
-                'mandate_pdf'             => '',
-                'status'                  => 'pending',
-            ),
-            array( '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%f', '%s', '%s', '%s', '%s', '%s' )
+        $mandate_record = array(
+            'account_reference'       => $account_reference,
+            'mandate_name'            => sanitize_text_field( $data['mandateName'] ?? '' ),
+            'is_individual'           => ! empty( $data['isIndividual'] ) ? 1 : 0,
+            'first_name'              => sanitize_text_field( $data['firstName'] ?? '' ),
+            'surname'                 => sanitize_text_field( $data['surname'] ?? '' ),
+            'business_account_name'   => sanitize_text_field( $data['businessAccountName'] ?? '' ),
+            'business_account_reg_no' => sanitize_text_field( $data['businessAccountRegNo'] ?? '' ),
+            'business_account_reg_name' => sanitize_text_field( $data['businessAccountRegName'] ?? '' ),
+            'mobile_no'                 => sanitize_text_field( $data['mobileNo'] ?? '' ),
+            'email_address'             => sanitize_email( $data['emailAddress'] ?? '' ),
+            'building'                  => sanitize_text_field( $data['building'] ?? '' ),
+            'street'                    => sanitize_text_field( $data['street'] ?? '' ),
+            'city'                      => sanitize_text_field( $data['city'] ?? '' ),
+            'province'                  => sanitize_text_field( $data['province'] ?? '' ),
+            'postal_code'               => sanitize_text_field( $data['postalCode'] ?? '' ),
+            'debit_day'                 => sanitize_text_field( $data['debitDay'] ?? '' ),
+            'amount'                    => (float) ( $data['mandateAmount'] ?? 0 ),
+            'agreement_date'            => '',
+            'mandate_reference'         => '',
+            'reason_for_decline'        => '',
+            'mandate_pdf'               => '',
+            'status'                    => 'pending',
         );
+        $mandate_formats = array( '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%f', '%s', '%s', '%s', '%s', '%s' );
+        foreach ( array( 'custom1', 'custom2', 'custom3', 'custom4', 'custom5' ) as $custom_field ) {
+            $custom_value = $custom_field_values[ $custom_field ] ?? '';
+            $mandate_record[ $custom_field ] = is_bool( $custom_value )
+                ? ( $custom_value ? 'true' : 'false' )
+                : sanitize_text_field( (string) $custom_value );
+            $mandate_formats[] = '%s';
+        }
+
+        $inserted = $wpdb->insert( $table_name, $mandate_record, $mandate_formats );
 
         if ( false === $inserted ) {
             error_log(

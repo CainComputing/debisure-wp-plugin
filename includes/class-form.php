@@ -5,8 +5,49 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 add_shortcode( 'debisure_form', 'debisure_render_form_shortcode' );
 
+function debisure_default_custom_form_fields() {
+    $fields = array();
+    for ( $index = 1; $index <= 5; $index++ ) {
+        $key = 'custom' . $index;
+        $fields[ $key ] = array(
+            'label' => 'Custom Field ' . $index,
+            'type'  => 'text',
+        );
+    }
+    return $fields;
+}
+
+function debisure_sanitize_custom_form_fields( $input ) {
+    $defaults = debisure_default_custom_form_fields();
+    $input = is_array( $input ) ? $input : array();
+    $fields = array();
+
+    foreach ( $defaults as $key => $default ) {
+        $submitted = isset( $input[ $key ] ) && is_array( $input[ $key ] ) ? $input[ $key ] : array();
+        $label = isset( $submitted['label'] ) && is_scalar( $submitted['label'] )
+            ? sanitize_text_field( (string) $submitted['label'] )
+            : $default['label'];
+        $type = isset( $submitted['type'] ) && is_string( $submitted['type'] ) && in_array( $submitted['type'], array( 'text', 'checkbox' ), true )
+            ? $submitted['type']
+            : $default['type'];
+
+        $fields[ $key ] = array(
+            'label' => '' !== $label ? $label : $default['label'],
+            'type'  => $type,
+        );
+    }
+
+    return $fields;
+}
+
+function debisure_get_custom_form_fields() {
+    return debisure_sanitize_custom_form_fields(
+        get_option( 'debisure_custom_form_fields', debisure_default_custom_form_fields() )
+    );
+}
+
 function debisure_form_field_definitions() {
-    return array(
+    $definitions = array(
         'firstName' => array(
             'label'          => 'Name',
             'type'           => 'text',
@@ -60,7 +101,7 @@ function debisure_form_field_definitions() {
             'builder_hidden' => true,
         ),
         'isBusinessAccount' => array(
-            'label'   => 'Is this a business account?',
+            'label'   => 'I am signing on behalf of an organisation',
             'type'    => 'checkbox',
             'business_toggle' => true,
         ),
@@ -132,6 +173,17 @@ function debisure_form_field_definitions() {
             ),
         ),
     );
+
+    foreach ( debisure_get_custom_form_fields() as $key => $custom_field ) {
+        $definitions[ $key ] = array(
+            'label'        => $custom_field['label'],
+            'type'         => $custom_field['type'],
+            'value'        => '',
+            'custom_field' => true,
+        );
+    }
+
+    return $definitions;
 }
 
 function debisure_form_builder_field_order() {
@@ -214,7 +266,7 @@ function debisure_default_form_fields() {
     $defaults = array();
     foreach ( debisure_form_field_definitions() as $key => $definition ) {
         $defaults[ $key ] = array(
-            'enabled'  => true,
+            'enabled'  => empty( $definition['custom_field'] ),
             'required' => ! empty( $definition['builder_locked'] )
                 || in_array( $key, array( 'mandateAmount' ), true ),
         );
@@ -231,6 +283,13 @@ function debisure_sanitize_form_fields( $input ) {
             $fields[ $key ] = array(
                 'enabled'  => true,
                 'required' => true,
+            );
+            continue;
+        }
+        if ( ! empty( $definition['custom_field'] ) ) {
+            $fields[ $key ] = array(
+                'enabled'  => isset( $submitted['enabled'] ) && '1' === (string) $submitted['enabled'],
+                'required' => isset( $submitted['required'] ) && '1' === (string) $submitted['required'],
             );
             continue;
         }
@@ -291,6 +350,17 @@ function debisure_render_form_shortcode() {
     $definitions = debisure_form_field_definitions();
     $definitions['debitDay']['options'] = debisure_get_form_debit_days();
     $amounts = debisure_get_form_amounts();
+    $recaptcha_settings = debisure_get_recaptcha_settings();
+    $recaptcha_enabled = '' !== $recaptcha_settings['site_key'] && '' !== $recaptcha_settings['secret_key'];
+    if ( $recaptcha_enabled ) {
+        wp_enqueue_script(
+            'debisure-recaptcha-v3',
+            add_query_arg( 'render', $recaptcha_settings['site_key'], 'https://www.google.com/recaptcha/api.js' ),
+            array(),
+            null,
+            true
+        );
+    }
 
     ob_start();
     ?>
@@ -320,7 +390,7 @@ function debisure_render_form_shortcode() {
                 <?php if ( 'checkbox' === $definition['type'] ) : ?>
                     <div class="debisure-form-row debisure-checkbox-row">
                         <label>
-                            <input type="checkbox" id="<?php echo esc_attr( $field_id ); ?>" data-debisure-field="<?php echo esc_attr( $key ); ?>" value="true" <?php if ( ! empty( $definition['business_toggle'] ) ) : ?>data-business-account-toggle="1"<?php endif; ?> />
+                            <input type="checkbox" id="<?php echo esc_attr( $field_id ); ?>" data-debisure-field="<?php echo esc_attr( $key ); ?>" value="true" <?php if ( ! empty( $definition['business_toggle'] ) ) : ?>data-business-account-toggle="1"<?php endif; ?> <?php if ( ! empty( $definition['custom_field'] ) && ! empty( $fields[ $key ]['required'] ) ) : ?>required="required"<?php endif; ?> />
                             <?php echo esc_html( $definition['label'] ); ?>
                             <?php if ( ! empty( $fields[ $key ]['required'] ) ) : ?>
                                 <span class="debisure-required-asterisk" aria-hidden="true">*</span>
@@ -462,6 +532,7 @@ function debisure_form_scripts() {
             const formData = {
                 accountReference: document.getElementById('deb_account_reference').value
             };
+            const recaptchaSiteKey = <?php echo wp_json_encode( $recaptcha_enabled ? $recaptcha_settings['site_key'] : '' ); ?>;
             const selectedAmount = form.querySelector('[data-debisure-amount-choice]:checked');
             if (selectedAmount) {
                 if (selectedAmount.value === 'other') {
@@ -480,7 +551,8 @@ function debisure_form_scripts() {
                 }
             });
 
-            fetch('<?php echo esc_url( admin_url('admin-ajax.php?action=debisure_submit_form') ); ?>', {
+            const sendForm = function () {
+                fetch('<?php echo esc_url( admin_url('admin-ajax.php?action=debisure_submit_form') ); ?>', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -520,6 +592,31 @@ function debisure_form_scripts() {
                 msgBox.innerHTML = '<div style="padding: 10px; background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;">Network error occurred. Please try again.</div>';
                 console.error('Error:', error);
             });
+            };
+
+            if (recaptchaSiteKey) {
+                if (!window.grecaptcha) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerText = 'Submit Mandate';
+                    msgBox.textContent = 'reCAPTCHA could not be loaded. Please try again.';
+                    return;
+                }
+                window.grecaptcha.ready(function () {
+                    window.grecaptcha.execute(recaptchaSiteKey, { action: 'mandate_submit' })
+                        .then(function (token) {
+                            formData.recaptchaToken = token;
+                            sendForm();
+                        })
+                        .catch(function (error) {
+                            submitBtn.disabled = false;
+                            submitBtn.innerText = 'Submit Mandate';
+                            msgBox.textContent = 'reCAPTCHA verification could not be completed. Please try again.';
+                            console.error('reCAPTCHA error:', error);
+                        });
+                });
+            } else {
+                sendForm();
+            }
         });
     });
     </script>

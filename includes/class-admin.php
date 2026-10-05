@@ -5,6 +5,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 add_action( 'admin_menu', 'debisure_admin_menus' );
 add_action( 'admin_post_debisure_resend_mandate', 'debisure_handle_resend_mandate' );
+add_action( 'admin_post_debisure_export_mandates', 'debisure_handle_export_mandates' );
 function debisure_admin_menus() {
     $plugin_page = add_menu_page(
         'Debisure',
@@ -91,6 +92,14 @@ function debisure_register_settings() {
     );
     register_setting(
         'debisure_form_builder_group',
+        'debisure_custom_form_fields',
+        array(
+            'sanitize_callback' => 'debisure_sanitize_custom_form_fields',
+            'default'           => debisure_default_custom_form_fields(),
+        )
+    );
+    register_setting(
+        'debisure_form_builder_group',
         'debisure_form_amounts',
         array(
             'sanitize_callback' => 'debisure_sanitize_form_amounts',
@@ -104,6 +113,46 @@ function debisure_register_settings() {
             'sanitize_callback' => 'debisure_sanitize_form_debit_days',
             'default'           => array_keys( debisure_default_form_debit_days() ),
         )
+    );
+    register_setting(
+        'debisure_form_builder_group',
+        'debisure_recaptcha_settings',
+        array(
+            'sanitize_callback' => 'debisure_sanitize_recaptcha_settings',
+            'default'           => array( 'site_key' => '', 'secret_key' => '' ),
+        )
+    );
+}
+
+function debisure_sanitize_recaptcha_settings( $input ) {
+    $current = get_option( 'debisure_recaptcha_settings', array() );
+    $current = is_array( $current ) ? $current : array();
+    $current_secret = is_string( $current['secret_key'] ?? null ) ? $current['secret_key'] : '';
+    $current_site_key = is_string( $current['site_key'] ?? null ) ? $current['site_key'] : '';
+
+    if ( ! is_array( $input ) ) {
+        return array( 'site_key' => $current_site_key, 'secret_key' => $current_secret );
+    }
+
+    if ( isset( $input['clear_site'] ) && is_scalar( $input['clear_site'] ) && '1' === (string) $input['clear_site'] ) {
+        $site_key = '';
+    } elseif ( isset( $input['site_key'] ) && is_scalar( $input['site_key'] ) && '' !== trim( (string) $input['site_key'] ) ) {
+        $site_key = sanitize_text_field( trim( (string) $input['site_key'] ) );
+    } else {
+        $site_key = $current_site_key;
+    }
+
+    if ( isset( $input['clear_secret'] ) && is_scalar( $input['clear_secret'] ) && '1' === (string) $input['clear_secret'] ) {
+        $secret_key = '';
+    } elseif ( isset( $input['secret_key'] ) && is_string( $input['secret_key'] ) && '' !== trim( $input['secret_key'] ) ) {
+        $secret_key = debisure_encrypt_data( sanitize_text_field( trim( $input['secret_key'] ) ) );
+    } else {
+        $secret_key = $current_secret;
+    }
+
+    return array(
+        'site_key'   => $site_key,
+        'secret_key' => $secret_key,
     );
 }
 
@@ -328,6 +377,14 @@ function debisure_build_mandate_resubmission_payload( $mandate, $client_id ) {
         }
     }
 
+    $custom_settings = debisure_get_custom_form_fields();
+    foreach ( array( 'custom1', 'custom2', 'custom3', 'custom4', 'custom5' ) as $custom_field ) {
+        $custom_value = (string) ( $mandate->$custom_field ?? '' );
+        $data[ $custom_field ] = 'checkbox' === $custom_settings[ $custom_field ]['type']
+            ? in_array( strtolower( $custom_value ), array( '1', 'true', 'yes', 'on' ), true )
+            : $custom_value;
+    }
+
     if (
         ! $is_individual
         && '' === trim( $data['businessAccountRegName'] )
@@ -453,6 +510,107 @@ function debisure_handle_resend_mandate() {
     exit;
 }
 
+function debisure_handle_export_mandates() {
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_die( 'You are not allowed to export mandates.' );
+    }
+    check_admin_referer( 'debisure_export_mandates' );
+
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'debisure';
+    $search = isset( $_POST['debisure_mandate_search'] ) && is_scalar( $_POST['debisure_mandate_search'] )
+        ? sanitize_text_field( wp_unslash( $_POST['debisure_mandate_search'] ) )
+        : '';
+
+    if ( '' !== $search ) {
+        $like = '%' . $wpdb->esc_like( $search ) . '%';
+        $mandates = $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM $table_name
+            WHERE account_reference LIKE %s
+                OR first_name LIKE %s
+                OR surname LIKE %s
+                OR email_address LIKE %s
+                OR mandate_name LIKE %s
+                OR business_account_name LIKE %s
+            ORDER BY created_at DESC",
+            $like,
+            $like,
+            $like,
+            $like,
+            $like,
+            $like
+        ), ARRAY_A );
+    } else {
+        $mandates = $wpdb->get_results(
+            "SELECT * FROM $table_name ORDER BY created_at DESC",
+            ARRAY_A
+        );
+    }
+
+    if ( null === $mandates || '' !== $wpdb->last_error ) {
+        error_log( 'Debisure mandate CSV export failed: ' . $wpdb->last_error );
+        wp_die( 'Could not export mandates. Check the site error log for details.' );
+    }
+
+    $columns = array(
+        'id'                       => 'ID',
+        'created_at'               => 'Created',
+        'account_reference'        => 'Reference',
+        'mandate_name'             => 'Mandate Name',
+        'is_individual'            => 'Individual',
+        'first_name'               => 'First Name',
+        'surname'                  => 'Surname',
+        'business_account_name'    => 'Business Name',
+        'business_account_reg_no'  => 'Business Registration Number',
+        'business_account_reg_name'=> 'Business Registered Name',
+        'mobile_no'                => 'Mobile Number',
+        'email_address'            => 'Email',
+        'building'                 => 'Building',
+        'street'                   => 'Street',
+        'city'                     => 'City',
+        'province'                 => 'Province',
+        'postal_code'              => 'Postal Code',
+        'debit_day'                => 'Debit Day',
+        'custom1'                  => 'Custom 1',
+        'custom2'                  => 'Custom 2',
+        'custom3'                  => 'Custom 3',
+        'custom4'                  => 'Custom 4',
+        'custom5'                  => 'Custom 5',
+        'amount'                   => 'Amount',
+        'agreement_date'           => 'Agreement Date',
+        'mandate_reference'        => 'Mandate Reference',
+        'reason_for_decline'       => 'Reason for Decline',
+        'mandate_pdf'              => 'Mandate PDF',
+        'status'                   => 'Status',
+    );
+
+    nocache_headers();
+    header( 'Content-Type: text/csv; charset=utf-8' );
+    header( 'Content-Disposition: attachment; filename="debisure-mandates-' . gmdate( 'Y-m-d' ) . '.csv"' );
+
+    $output = fopen( 'php://output', 'w' );
+    if ( false === $output ) {
+        error_log( 'Debisure mandate CSV export failed: could not open output stream.' );
+        wp_die( 'Could not export mandates.' );
+    }
+
+    fputcsv( $output, array_values( $columns ) );
+    foreach ( $mandates as $mandate ) {
+        $row = array();
+        foreach ( $columns as $column => $label ) {
+            $value = (string) ( $mandate[ $column ] ?? '' );
+            if ( preg_match( '/\A[\s\x00-\x1F]*[=+\-@]/', $value ) ) {
+                $value = "'" . $value;
+            }
+            $row[] = $value;
+        }
+        fputcsv( $output, $row );
+    }
+
+    fclose( $output );
+    exit;
+}
+
 function debisure_mandates_page_html() {
     if ( ! current_user_can( 'manage_options' ) ) {
         return;
@@ -476,6 +634,17 @@ function debisure_mandates_page_html() {
     $search = isset( $_GET['debisure_mandate_search'] ) && is_scalar( $_GET['debisure_mandate_search'] )
         ? sanitize_text_field( wp_unslash( $_GET['debisure_mandate_search'] ) )
         : '';
+    $form_fields = debisure_get_form_fields();
+    $custom_form_fields = debisure_get_custom_form_fields();
+    $visible_custom_fields = array();
+    foreach ( array( 'custom1', 'custom2', 'custom3', 'custom4', 'custom5' ) as $custom_field ) {
+        if ( ! empty( $form_fields[ $custom_field ]['enabled'] ) ) {
+            $visible_custom_fields[ $custom_field ] = $custom_form_fields[ $custom_field ];
+        }
+    }
+    $custom_columns_sql = $visible_custom_fields
+        ? ', ' . implode( ', ', array_keys( $visible_custom_fields ) )
+        : '';
 
     if ( '' !== $search ) {
         $like = '%' . $wpdb->esc_like( $search ) . '%';
@@ -496,7 +665,7 @@ function debisure_mandates_page_html() {
             $like
         ) );
         $mandates = $wpdb->get_results( $wpdb->prepare(
-            "SELECT id, account_reference, mandate_name, is_individual, first_name, surname, business_account_name, email_address, amount, debit_day, status, created_at
+            "SELECT id, account_reference, mandate_name, is_individual, first_name, surname, business_account_name, email_address, amount, debit_day, status, created_at$custom_columns_sql
             FROM $table_name
             WHERE account_reference LIKE %s
                 OR first_name LIKE %s
@@ -518,7 +687,7 @@ function debisure_mandates_page_html() {
     } else {
         $total = $wpdb->get_var( "SELECT COUNT(*) FROM $table_name" );
         $mandates = $wpdb->get_results( $wpdb->prepare(
-            "SELECT id, account_reference, mandate_name, is_individual, first_name, surname, business_account_name, email_address, amount, debit_day, status, created_at
+            "SELECT id, account_reference, mandate_name, is_individual, first_name, surname, business_account_name, email_address, amount, debit_day, status, created_at$custom_columns_sql
             FROM $table_name
             ORDER BY created_at DESC
             LIMIT %d OFFSET %d",
@@ -570,6 +739,12 @@ function debisure_mandates_page_html() {
                 <?php submit_button( 'Search Mandates', '', '', false ); ?>
             </p>
         </form>
+        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin: 0 0 1em;">
+            <input type="hidden" name="action" value="debisure_export_mandates" />
+            <input type="hidden" name="debisure_mandate_search" value="<?php echo esc_attr( $search ); ?>" />
+            <?php wp_nonce_field( 'debisure_export_mandates' ); ?>
+            <?php submit_button( 'Download CSV', 'secondary', 'submit', false ); ?>
+        </form>
 
         <p><?php echo esc_html( number_format_i18n( $total ) ); ?> mandate<?php echo 1 === $total ? '' : 's'; ?></p>
 
@@ -586,11 +761,14 @@ function debisure_mandates_page_html() {
                     <th scope="col">Amount</th>
                     <th scope="col">Status</th>
                     <th scope="col">Action</th>
+                    <?php foreach ( $visible_custom_fields as $custom_field => $custom_definition ) : ?>
+                        <th scope="col" title="<?php echo esc_attr( $custom_definition['label'] ); ?>"><?php echo esc_html( 'Custom ' . substr( $custom_field, 6 ) ); ?></th>
+                    <?php endforeach; ?>
                 </tr>
             </thead>
             <tbody>
                 <?php if ( empty( $mandates ) ) : ?>
-                    <tr><td colspan="10"><?php echo '' === $search ? 'No mandates have been submitted yet.' : 'No mandates match your search.'; ?></td></tr>
+                    <tr><td colspan="<?php echo esc_attr( (string) ( 10 + count( $visible_custom_fields ) ) ); ?>"><?php echo '' === $search ? 'No mandates have been submitted yet.' : 'No mandates match your search.'; ?></td></tr>
                 <?php else : ?>
                     <?php foreach ( $mandates as $mandate ) : ?>
                         <?php
@@ -629,6 +807,15 @@ function debisure_mandates_page_html() {
                                     &mdash;
                                 <?php endif; ?>
                             </td>
+                            <?php foreach ( $visible_custom_fields as $custom_field => $custom_definition ) : ?>
+                                <?php
+                                $custom_value = (string) ( $mandate->$custom_field ?? '' );
+                                if ( 'checkbox' === $custom_definition['type'] && '' !== $custom_value ) {
+                                    $custom_value = in_array( strtolower( $custom_value ), array( '1', 'true', 'yes', 'on' ), true ) ? 'Yes' : 'No';
+                                }
+                                ?>
+                                <td><?php echo esc_html( $custom_value ); ?></td>
+                            <?php endforeach; ?>
                         </tr>
                     <?php endforeach; ?>
                 <?php endif; ?>
@@ -769,12 +956,13 @@ function debisure_settings_page_html() {
         $fields = debisure_get_form_fields();
         $amounts = debisure_get_form_amounts();
         $debit_days = debisure_get_form_debit_days();
+        $recaptcha_settings = debisure_get_recaptcha_settings();
         ?>
         <?php settings_errors(); ?>
         <div class="notice notice-info inline" style="margin: 15px 0 20px 0; padding: 12px;">
             <h3>Debisure Form Builder</h3>
         </div>
-        <p>Choose which supported mandate fields appear on the form and whether each is required.</p>
+        <p>Choose which supported mandate fields appear on the form, edit custom field labels and types, and set whether fields are required.</p>
         <form action="options.php" method="post">
             <?php settings_fields( 'debisure_form_builder_group' ); ?>
             <?php $field_definitions = debisure_form_field_definitions(); ?>
@@ -782,6 +970,7 @@ function debisure_settings_page_html() {
                 <thead>
                     <tr>
                         <th scope="col">Field</th>
+                        <th scope="col">Type</th>
                         <th scope="col">Show on form</th>
                         <th scope="col">Required</th>
                     </tr>
@@ -790,8 +979,25 @@ function debisure_settings_page_html() {
                     <?php foreach ( debisure_form_builder_field_order() as $key ) : ?>
                         <?php $definition = $field_definitions[ $key ]; ?>
                         <?php $locked = ! empty( $definition['builder_locked'] ); ?>
+                        <?php $custom_field = ! empty( $definition['custom_field'] ); ?>
                         <tr<?php echo $locked ? ' style="background-color: #e5e5e5;"' : ''; ?>>
-                            <th scope="row"><?php echo esc_html( $definition['builder_label'] ?? $definition['label'] ); ?></th>
+                            <th scope="row">
+                                <?php if ( $custom_field ) : ?>
+                                    <label class="screen-reader-text" for="debisure_custom_label_<?php echo esc_attr( $key ); ?>">Label for <?php echo esc_html( $key ); ?></label>
+                                    <input type="text" class="debisure-custom-field-label" id="debisure_custom_label_<?php echo esc_attr( $key ); ?>" name="debisure_custom_form_fields[<?php echo esc_attr( $key ); ?>][label]" value="<?php echo esc_attr( $definition['label'] ); ?>" />
+                                <?php else : ?>
+                                    <?php echo esc_html( $definition['builder_label'] ?? $definition['label'] ); ?>
+                                <?php endif; ?>
+                            </th>
+                            <td>
+                                <?php if ( $custom_field ) : ?>
+                                    <label class="screen-reader-text" for="debisure_custom_type_<?php echo esc_attr( $key ); ?>">Type for <?php echo esc_html( $definition['label'] ); ?></label>
+                                    <select class="debisure-custom-field-type" id="debisure_custom_type_<?php echo esc_attr( $key ); ?>" name="debisure_custom_form_fields[<?php echo esc_attr( $key ); ?>][type]">
+                                        <option value="text" <?php selected( 'text', $definition['type'] ); ?>>Text</option>
+                                        <option value="checkbox" <?php selected( 'checkbox', $definition['type'] ); ?>>Checkbox</option>
+                                    </select>
+                                <?php endif; ?>
+                            </td>
                             <td>
                                 <label>
                                     <input type="checkbox" name="debisure_form_fields[<?php echo esc_attr( $key ); ?>][enabled]" value="1" <?php checked( $fields[ $key ]['enabled'] ); ?> <?php disabled( $locked ); ?> />
@@ -832,6 +1038,27 @@ function debisure_settings_page_html() {
                         <?php echo esc_html( $label ); ?>
                     </label>
                 <?php endforeach; ?>
+            </div>
+            <h2>reCAPTCHA v3</h2>
+            <p>Enter both Google reCAPTCHA v3 keys to enable verification on the public form.</p>
+            <?php if ( ( '' !== $recaptcha_settings['site_key'] ) !== ( '' !== $recaptcha_settings['secret_key'] ) ) : ?>
+                <div class="notice notice-warning inline"><p>reCAPTCHA is not enabled because both keys are required.</p></div>
+            <?php endif; ?>
+            <div class="debisure-recaptcha-settings">
+                <p>
+                    <label for="debisure_recaptcha_site_key">Site key</label><br />
+                    <input type="password" class="regular-text" id="debisure_recaptcha_site_key" name="debisure_recaptcha_settings[site_key]" value="" placeholder="<?php echo '' !== $recaptcha_settings['site_key'] ? 'Saved; enter a new key to replace it' : ''; ?>" autocomplete="new-password" />
+                    <?php if ( '' !== $recaptcha_settings['site_key'] ) : ?>
+                        <br /><label><input type="checkbox" name="debisure_recaptcha_settings[clear_site]" value="1" /> Clear saved site key</label>
+                    <?php endif; ?>
+                </p>
+                <p>
+                    <label for="debisure_recaptcha_secret_key">Secret key</label><br />
+                    <input type="password" class="regular-text" id="debisure_recaptcha_secret_key" name="debisure_recaptcha_settings[secret_key]" value="" placeholder="<?php echo '' !== $recaptcha_settings['secret_key'] ? 'Saved; enter a new key to replace it' : ''; ?>" autocomplete="new-password" />
+                </p>
+                <?php if ( '' !== $recaptcha_settings['secret_key'] ) : ?>
+                    <p><label><input type="checkbox" name="debisure_recaptcha_settings[clear_secret]" value="1" /> Clear saved secret key</label></p>
+                <?php endif; ?>
             </div>
             <?php submit_button( 'Save Form Settings' ); ?>
         </form>

@@ -20,6 +20,7 @@ if ( ! defined( 'DEBISURE_PLUGIN_URL' ) ) {
 }
 
 register_activation_hook( __FILE__, 'debisure_create_database_table' );
+add_action( 'init', 'debisure_maybe_upgrade_database' );
 register_deactivation_hook( __FILE__, 'debisure_clear_cron_events' );
 add_action( 'init', 'debisure_schedule_pending_mandate_cleanup' );
 add_action( 'debisure_cleanup_pending_mandates', 'debisure_mark_stale_pending_mandates_incomplete' );
@@ -48,6 +49,11 @@ function debisure_create_database_table() {
         province varchar(255) NOT NULL DEFAULT '',
         postal_code varchar(50) NOT NULL DEFAULT '',
         debit_day varchar(50) NOT NULL DEFAULT '',
+        custom1 varchar(255) NOT NULL DEFAULT '',
+        custom2 varchar(255) NOT NULL DEFAULT '',
+        custom3 varchar(255) NOT NULL DEFAULT '',
+        custom4 varchar(255) NOT NULL DEFAULT '',
+        custom5 varchar(255) NOT NULL DEFAULT '',
         amount decimal(10,2) NOT NULL,
         agreement_date varchar(50) NOT NULL DEFAULT '',
         mandate_reference varchar(100) NOT NULL DEFAULT '',
@@ -61,6 +67,21 @@ function debisure_create_database_table() {
 
     require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
     dbDelta( $sql );
+
+    $columns = $wpdb->get_results( "SHOW COLUMNS FROM $table_name", ARRAY_A );
+    $column_names = is_array( $columns ) ? wp_list_pluck( $columns, 'Field' ) : array();
+    $custom_columns = array( 'custom1', 'custom2', 'custom3', 'custom4', 'custom5' );
+    if ( ! array_diff( $custom_columns, $column_names ) ) {
+        update_option( 'debisure_db_version', 2 );
+    } else {
+        error_log( 'Debisure database upgrade failed: custom field columns are missing.' );
+    }
+}
+
+function debisure_maybe_upgrade_database() {
+    if ( (int) get_option( 'debisure_db_version', 0 ) < 2 ) {
+        debisure_create_database_table();
+    }
 }
 
 function debisure_schedule_pending_mandate_cleanup() {
