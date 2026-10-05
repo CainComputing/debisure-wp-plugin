@@ -420,7 +420,7 @@ function debisure_handle_form_submission() {
         if ( null === $province_code ) {
             wp_send_json_error( 'Please select a valid province.' );
         }
-        $data['province'] = $province_code;
+        $data['province'] = (string) $province_code;
     }
 
     if ( empty( $data['accountReference'] ) || ! is_scalar( $data['accountReference'] ) ) {
