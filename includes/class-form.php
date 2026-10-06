@@ -231,6 +231,9 @@ function debisure_default_form_amounts() {
     return array(
         'options'       => array( '100', '500', '1000' ),
         'custom_default' => '1000',
+        'allow_custom'  => true,
+        'custom_minimum' => '1.00',
+        'custom_maximum' => '',
     );
 }
 
@@ -252,13 +255,28 @@ function debisure_get_form_amounts() {
     if ( count( array_unique( $amounts ) ) !== 3 ) {
         return $defaults;
     }
-    if ( ! is_numeric( $saved['custom_default'] ) || ! is_finite( (float) $saved['custom_default'] ) || (float) $saved['custom_default'] < 1 ) {
+    $custom_minimum = $saved['custom_minimum'] ?? $defaults['custom_minimum'];
+    if ( ! is_numeric( $custom_minimum ) || ! is_finite( (float) $custom_minimum ) || (float) $custom_minimum < 1 ) {
+        return $defaults;
+    }
+    $custom_minimum = number_format( (float) $custom_minimum, 2, '.', '' );
+    $custom_maximum = $saved['custom_maximum'] ?? '';
+    if ( '' !== $custom_maximum && ( ! is_numeric( $custom_maximum ) || ! is_finite( (float) $custom_maximum ) || (float) $custom_maximum < (float) $custom_minimum ) ) {
+        return $defaults;
+    }
+    if ( ! is_numeric( $saved['custom_default'] ) || ! is_finite( (float) $saved['custom_default'] ) || (float) $saved['custom_default'] < (float) $custom_minimum ) {
+        return $defaults;
+    }
+    if ( '' !== $custom_maximum && (float) $saved['custom_default'] > (float) $custom_maximum ) {
         return $defaults;
     }
 
     return array(
         'options'        => $amounts,
         'custom_default' => number_format( (float) $saved['custom_default'], 2, '.', '' ),
+        'allow_custom'   => ! array_key_exists( 'allow_custom', $saved ) || (bool) $saved['allow_custom'],
+        'custom_minimum' => $custom_minimum,
+        'custom_maximum' => '' === $custom_maximum ? '' : number_format( (float) $custom_maximum, 2, '.', '' ),
     );
 }
 
@@ -406,7 +424,7 @@ function debisure_render_form_shortcode() {
                             <?php endif; ?>
                         </label>
                         <?php if ( 'amount_radio' === $definition['type'] ) : ?>
-                            <div class="debisure-amount-options" data-required="<?php echo ! empty( $fields[ $key ]['required'] ) ? '1' : '0'; ?>">
+                            <div class="debisure-amount-options" data-required="<?php echo ! empty( $fields[ $key ]['required'] ) ? '1' : '0'; ?>" data-allow-custom="<?php echo ! empty( $amounts['allow_custom'] ) ? '1' : '0'; ?>">
                                 <?php foreach ( $amounts['options'] as $index => $amount ) : ?>
                                     <label>
                                         <input
@@ -420,32 +438,35 @@ function debisure_render_form_shortcode() {
                                         R<?php echo esc_html( rtrim( rtrim( number_format( (float) $amount, 2, '.', '' ), '0' ), '.' ) ); ?>
                                     </label><br />
                                 <?php endforeach; ?>
-                                <label>
-                                    <input
-                                        type="radio"
-                                        name="debisure_amount_choice"
-                                        value="other"
-                                        data-debisure-amount-choice
-                                        <?php echo ! empty( $fields[ $key ]['required'] ) ? 'required="required"' : ''; ?>
-                                    />
-                                    Other
-                                </label>
-                                <div class="debisure-custom-amount" hidden>
-                                    <label for="deb_custom_mandate_amount">
-                                        Custom Amount (R)
-                                        <?php if ( ! empty( $fields[ $key ]['required'] ) ) : ?>
-                                            <span class="debisure-required-asterisk" aria-hidden="true">*</span>
-                                        <?php endif; ?>
+                                <?php if ( ! empty( $amounts['allow_custom'] ) ) : ?>
+                                    <label>
+                                        <input
+                                            type="radio"
+                                            name="debisure_amount_choice"
+                                            value="other"
+                                            data-debisure-amount-choice
+                                            <?php echo ! empty( $fields[ $key ]['required'] ) ? 'required="required"' : ''; ?>
+                                        />
+                                        Other
                                     </label>
-                                    <input
-                                        type="number"
-                                        id="deb_custom_mandate_amount"
-                                        value="<?php echo esc_attr( $amounts['custom_default'] ); ?>"
-                                        min="1"
-                                        step="0.01"
-                                        data-debisure-custom-amount
-                                    />
-                                </div>
+                                    <div class="debisure-custom-amount" hidden>
+                                        <label for="deb_custom_mandate_amount">
+                                            Custom Amount (R)
+                                            <?php if ( ! empty( $fields[ $key ]['required'] ) ) : ?>
+                                                <span class="debisure-required-asterisk" aria-hidden="true">*</span>
+                                            <?php endif; ?>
+                                        </label>
+                                        <input
+                                            type="number"
+                                            id="deb_custom_mandate_amount"
+                                            value="<?php echo esc_attr( $amounts['custom_default'] ); ?>"
+                                            min="<?php echo esc_attr( $amounts['custom_minimum'] ); ?>"
+                                            <?php if ( '' !== $amounts['custom_maximum'] ) : ?>max="<?php echo esc_attr( $amounts['custom_maximum'] ); ?>"<?php endif; ?>
+                                            step="0.01"
+                                            data-debisure-custom-amount
+                                        />
+                                    </div>
+                                <?php endif; ?>
                             </div>
                         <?php elseif ( 'select' === $definition['type'] ) : ?>
                             <select id="<?php echo esc_attr( $field_id ); ?>" data-debisure-field="<?php echo esc_attr( $key ); ?>" <?php if ( ! empty( $fields[ $key ]['required'] ) ) : ?>data-builder-required="1" required="required"<?php endif; ?>>
@@ -537,8 +558,10 @@ function debisure_form_scripts() {
             if (selectedAmount) {
                 if (selectedAmount.value === 'other') {
                     formData.mandateAmount = customAmountInput.value === '' ? null : parseFloat(customAmountInput.value);
+                    formData.isCustomAmount = true;
                 } else {
                     formData.mandateAmount = parseFloat(selectedAmount.value);
+                    formData.isCustomAmount = false;
                 }
             }
             form.querySelectorAll('[data-debisure-field]').forEach(function (field) {

@@ -180,7 +180,7 @@ function debisure_sanitize_form_debit_days( $input ) {
 function debisure_sanitize_form_amounts( $input ) {
     $current = debisure_get_form_amounts();
     if ( ! is_array( $input ) || ! isset( $input['options'], $input['custom_default'] ) || ! is_array( $input['options'] ) || 3 !== count( $input['options'] ) ) {
-        add_settings_error( 'debisure_form_amounts', 'invalid_amount_options', 'Enter three different preset amounts and a custom default of at least R1.00.', 'error' );
+        add_settings_error( 'debisure_form_amounts', 'invalid_amount_options', 'Enter three different preset amounts and valid custom amount settings.', 'error' );
         return $current;
     }
 
@@ -198,15 +198,38 @@ function debisure_sanitize_form_amounts( $input ) {
         return $current;
     }
 
+    $custom_minimum = $input['custom_minimum'] ?? '1';
+    if ( ! is_scalar( $custom_minimum ) || ! is_numeric( $custom_minimum ) || ! is_finite( (float) $custom_minimum ) || (float) $custom_minimum < 1 ) {
+        add_settings_error( 'debisure_form_amounts', 'invalid_custom_minimum', 'The minimum custom amount must be at least R1.00.', 'error' );
+        return $current;
+    }
+    $custom_minimum = number_format( (float) $custom_minimum, 2, '.', '' );
+
+    $custom_maximum = $input['custom_maximum'] ?? '';
+    if ( ! is_scalar( $custom_maximum ) || ( '' !== (string) $custom_maximum && ( ! is_numeric( $custom_maximum ) || ! is_finite( (float) $custom_maximum ) || (float) $custom_maximum < (float) $custom_minimum ) ) ) {
+        add_settings_error( 'debisure_form_amounts', 'invalid_custom_maximum', 'The maximum custom amount must be blank or no less than the minimum custom amount.', 'error' );
+        return $current;
+    }
+    $custom_maximum = '' === (string) $custom_maximum ? '' : number_format( (float) $custom_maximum, 2, '.', '' );
+
     $custom_default = $input['custom_default'];
-    if ( ! is_scalar( $custom_default ) || ! is_numeric( $custom_default ) || ! is_finite( (float) $custom_default ) || (float) $custom_default < 1 ) {
-        add_settings_error( 'debisure_form_amounts', 'invalid_custom_amount', 'The default custom amount must be a number of at least R1.00.', 'error' );
+    if (
+        ! is_scalar( $custom_default )
+        || ! is_numeric( $custom_default )
+        || ! is_finite( (float) $custom_default )
+        || (float) $custom_default < (float) $custom_minimum
+        || ( '' !== $custom_maximum && (float) $custom_default > (float) $custom_maximum )
+    ) {
+        add_settings_error( 'debisure_form_amounts', 'invalid_custom_amount', 'The default custom amount must be within the configured custom amount limits.', 'error' );
         return $current;
     }
 
     return array(
         'options'        => $amounts,
         'custom_default' => number_format( (float) $custom_default, 2, '.', '' ),
+        'allow_custom'   => isset( $input['allow_custom'] ) && is_scalar( $input['allow_custom'] ) && '1' === (string) $input['allow_custom'],
+        'custom_minimum' => $custom_minimum,
+        'custom_maximum' => $custom_maximum,
     );
 }
 
@@ -1015,7 +1038,7 @@ function debisure_settings_page_html() {
                 </tbody>
             </table>
             <h2>Amount Options</h2>
-            <p>Set three distinct preset amounts and the default value shown when a customer chooses Other. All values must be at least R1.00.</p>
+            <p>Set three distinct preset amounts, then choose whether customers may enter a custom amount.</p>
             <div class="debisure-amount-presets">
                 <?php foreach ( $amounts['options'] as $index => $amount ) : ?>
                     <div class="debisure-amount-preset">
@@ -1023,11 +1046,41 @@ function debisure_settings_page_html() {
                         <input type="number" min="1" step="0.01" id="debisure_amount_option_<?php echo esc_attr( (string) $index ); ?>" name="debisure_form_amounts[options][<?php echo esc_attr( (string) $index ); ?>]" value="<?php echo esc_attr( $amount ); ?>" required />
                     </div>
                 <?php endforeach; ?>
-                <div class="debisure-amount-preset">
-                    <label for="debisure_custom_amount_default">Custom Amount</label>
-                    <input type="number" min="1" step="0.01" id="debisure_custom_amount_default" name="debisure_form_amounts[custom_default]" value="<?php echo esc_attr( $amounts['custom_default'] ); ?>" required />
+            </div>
+            <p>
+                <label for="debisure_allow_custom_amount">
+                    <input type="checkbox" id="debisure_allow_custom_amount" name="debisure_form_amounts[allow_custom]" value="1" <?php checked( $amounts['allow_custom'] ); ?> />
+                    Allow custom amount
+                </label>
+            </p>
+            <div id="debisure_custom_amount_settings" <?php echo $amounts['allow_custom'] ? '' : 'hidden'; ?>>
+                <div class="debisure-amount-presets">
+                    <div class="debisure-amount-preset">
+                        <label for="debisure_custom_amount_default">Custom Amount</label>
+                        <input type="number" min="1" step="0.01" id="debisure_custom_amount_default" name="debisure_form_amounts[custom_default]" value="<?php echo esc_attr( $amounts['custom_default'] ); ?>" required />
+                    </div>
+                    <div class="debisure-amount-preset">
+                        <label for="debisure_custom_amount_minimum">Minimum custom amount</label>
+                        <input type="number" min="1" step="0.01" id="debisure_custom_amount_minimum" name="debisure_form_amounts[custom_minimum]" value="<?php echo esc_attr( $amounts['custom_minimum'] ); ?>" required />
+                    </div>
+                    <div class="debisure-amount-preset">
+                        <label for="debisure_custom_amount_maximum">Maximum custom amount</label>
+                        <input type="number" min="1" step="0.01" id="debisure_custom_amount_maximum" name="debisure_form_amounts[custom_maximum]" value="<?php echo esc_attr( $amounts['custom_maximum'] ); ?>" />
+                        <span class="description">Leave blank for no maximum.</span>
+                    </div>
                 </div>
             </div>
+            <script>
+                (function () {
+                    var allowCustomAmount = document.getElementById('debisure_allow_custom_amount');
+                    var customAmountSettings = document.getElementById('debisure_custom_amount_settings');
+                    if (allowCustomAmount && customAmountSettings) {
+                        allowCustomAmount.addEventListener('change', function () {
+                            customAmountSettings.hidden = !allowCustomAmount.checked;
+                        });
+                    }
+                }());
+            </script>
             <h2>Debit Day Options</h2>
             <p>Select at least one debit day option to make available on the form.</p>
             <div class="debisure-debit-day-options">

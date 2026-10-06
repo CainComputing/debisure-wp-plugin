@@ -373,6 +373,13 @@ function debisure_handle_form_submission() {
     $field_settings = debisure_get_form_fields();
     $field_definitions = debisure_form_field_definitions();
     $field_definitions['debitDay']['options'] = debisure_get_form_debit_days();
+    $amount_settings = debisure_get_form_amounts();
+    $custom_amount_value = $data['isCustomAmount'] ?? false;
+    if ( ! is_bool( $custom_amount_value ) && ! in_array( $custom_amount_value, array( 0, 1, '0', '1', 'true', 'false' ), true ) ) {
+        wp_send_json_error( 'Invalid custom amount selection.' );
+    }
+    $is_custom_amount = in_array( $custom_amount_value, array( true, 1, '1', 'true' ), true );
+    unset( $data['isCustomAmount'] );
     $is_business_account = false;
     if ( ! empty( $field_settings['isBusinessAccount']['enabled'] ) ) {
         $business_account_value = $data['isBusinessAccount'] ?? false;
@@ -435,8 +442,24 @@ function debisure_handle_form_submission() {
             if ( ! is_numeric( $value ) ) {
                 wp_send_json_error( $definition['label'] . ' must be a number.' );
             }
-            if ( 'amount_radio' === $definition['type'] && (float) $value < 1 ) {
-                wp_send_json_error( $definition['label'] . ' must be at least R1.00.' );
+            if ( 'amount_radio' === $definition['type'] ) {
+                $amount = (float) $value;
+                if ( $is_custom_amount ) {
+                    if ( empty( $amount_settings['allow_custom'] ) ) {
+                        wp_send_json_error( 'Custom amounts are not allowed.' );
+                    }
+                    if (
+                        $amount < (float) $amount_settings['custom_minimum']
+                        || ( '' !== $amount_settings['custom_maximum'] && $amount > (float) $amount_settings['custom_maximum'] )
+                    ) {
+                        wp_send_json_error( 'Custom amount must be within the configured minimum and maximum.' );
+                    }
+                } else {
+                    $preset_amounts = array_map( 'floatval', $amount_settings['options'] );
+                    if ( ! in_array( $amount, $preset_amounts, true ) ) {
+                        wp_send_json_error( 'Invalid preset amount selected.' );
+                    }
+                }
             }
             $data[ $field_name ] = (float) $value;
         } elseif ( 'select' === $definition['type'] ) {
