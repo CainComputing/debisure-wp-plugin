@@ -541,6 +541,13 @@ function debisure_form_scripts() {
             updateCustomAmount();
         }
 
+        const showErrorMessage = function (message, target) {
+            const errorMessage = document.createElement('div');
+            errorMessage.style.cssText = 'padding: 10px; background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; white-space: pre-line;';
+            errorMessage.textContent = 'Error: ' + message;
+            target.replaceChildren(errorMessage);
+        };
+
         form.addEventListener('submit', function (e) {
             e.preventDefault();
             const submitBtn = document.getElementById('debisure-submit-btn');
@@ -606,13 +613,13 @@ function debisure_form_scripts() {
                 } else {
                     submitBtn.disabled = false;
                     submitBtn.innerText = 'Submit Mandate';
-                    msgBox.innerHTML = '<div style="padding: 10px; background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;">Error: ' + (data.data || 'Unknown error occurred.') + '</div>';
+                    showErrorMessage(typeof data.data === 'string' ? data.data : 'Unknown error occurred.', msgBox);
                 }
             })
             .catch(error => {
                 submitBtn.disabled = false;
                 submitBtn.innerText = 'Submit Mandate';
-                msgBox.innerHTML = '<div style="padding: 10px; background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;">Network error occurred. Please try again.</div>';
+                showErrorMessage('Network error occurred. Please try again.', msgBox);
                 console.error('Error:', error);
             });
             };

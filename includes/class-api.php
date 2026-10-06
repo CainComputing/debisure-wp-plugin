@@ -296,6 +296,34 @@ function debisure_validate_api_credentials( $client_id, $service_key, $vendor_ke
 add_action( 'wp_ajax_debisure_submit_form', 'debisure_handle_form_submission' );
 add_action( 'wp_ajax_nopriv_debisure_submit_form', 'debisure_handle_form_submission' );
 
+function debisure_format_api_error_message( $response_code, $response_body ) {
+    $response_data = json_decode( $response_body, true );
+    if ( ! is_array( $response_data ) ) {
+        return 'API error (Code ' . (int) $response_code . '): ' . trim( $response_body );
+    }
+
+    $details = array();
+    if ( isset( $response_data['message'] ) && is_scalar( $response_data['message'] ) && '' !== trim( (string) $response_data['message'] ) ) {
+        $details[] = trim( (string) $response_data['message'] );
+    }
+    if ( isset( $response_data['errors'] ) && is_array( $response_data['errors'] ) ) {
+        foreach ( $response_data['errors'] as $error ) {
+            if ( is_scalar( $error ) && '' !== trim( (string) $error ) ) {
+                $details[] = trim( (string) $error );
+            }
+        }
+    }
+    if ( isset( $response_data['traceId'] ) && is_scalar( $response_data['traceId'] ) && '' !== trim( (string) $response_data['traceId'] ) ) {
+        $details[] = 'Reference: ' . trim( (string) $response_data['traceId'] );
+    }
+
+    if ( empty( $details ) ) {
+        $details[] = trim( $response_body );
+    }
+
+    return 'API error (Code ' . (int) $response_code . '): ' . implode( "\n", $details );
+}
+
 function debisure_verify_recaptcha_v3( $token ) {
     $settings = debisure_get_recaptcha_settings();
     $has_site_key = '' !== $settings['site_key'];
@@ -622,6 +650,6 @@ function debisure_handle_form_submission() {
 
         wp_send_json_success( json_decode( $response_body, true ) );
     } else {
-        wp_send_json_error( 'API error (Code ' . $response_code . '): ' . $response_body );
+        wp_send_json_error( debisure_format_api_error_message( $response_code, $response_body ) );
     }
 }
