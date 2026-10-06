@@ -302,6 +302,27 @@ function debisure_format_api_error_message( $response_code, $response_body ) {
         return 'API error (Code ' . (int) $response_code . '): ' . trim( $response_body );
     }
 
+    if ( 422 === (int) $response_code && isset( $response_data['errors'] ) && is_array( $response_data['errors'] ) ) {
+        $provider_errors = array();
+        foreach ( $response_data['errors'] as $error ) {
+            if ( is_scalar( $error ) ) {
+                $error = trim( (string) $error );
+                $prefix = 'Netcash rejected the mandate: ';
+                if ( 0 === strpos( $error, $prefix ) ) {
+                    $provider_errors[] = substr( $error, strlen( $prefix ) );
+                }
+            }
+        }
+
+        if ( ! empty( $provider_errors ) ) {
+            $details = $provider_errors;
+            if ( isset( $response_data['traceId'] ) && is_scalar( $response_data['traceId'] ) && '' !== trim( (string) $response_data['traceId'] ) ) {
+                $details[] = 'Reference: ' . trim( (string) $response_data['traceId'] );
+            }
+            return implode( "\n", $details );
+        }
+    }
+
     $details = array();
     if ( isset( $response_data['message'] ) && is_scalar( $response_data['message'] ) && '' !== trim( (string) $response_data['message'] ) ) {
         $details[] = trim( (string) $response_data['message'] );
@@ -483,9 +504,18 @@ function debisure_handle_form_submission() {
                         wp_send_json_error( 'Custom amount must be within the configured minimum and maximum.' );
                     }
                 } else {
-                    $preset_amounts = array_map( 'floatval', $amount_settings['options'] );
-                    if ( ! in_array( $amount, $preset_amounts, true ) ) {
-                        wp_send_json_error( 'Invalid preset amount selected.' );
+                    $amount_in_cents = (int) round( $amount * 100 );
+                    if ( abs( $amount - ( $amount_in_cents / 100 ) ) > 0.000001 ) {
+                        wp_send_json_error( 'Invalid preset amount selected. Please refresh the page and select an amount again.' );
+                    }
+                    $preset_amounts_in_cents = array_map(
+                        static function ( $preset_amount ) {
+                            return (int) round( (float) $preset_amount * 100 );
+                        },
+                        $amount_settings['options']
+                    );
+                    if ( ! in_array( $amount_in_cents, $preset_amounts_in_cents, true ) ) {
+                        wp_send_json_error( 'Invalid preset amount selected. Please refresh the page and select an amount again.' );
                     }
                 }
             }
